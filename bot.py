@@ -68,6 +68,8 @@ USER_TEMP_FILTERS = {}
 GLOBAL_CACHED_DATA = None  
 GLOBAL_WEATHER_CACHE = {}
 LAST_WEATHER_UPDATE = None
+STORM_LOCK = asyncio.Lock()
+
 
 async def update_weather_cache():
     global GLOBAL_WEATHER_CACHE, LAST_WEATHER_UPDATE
@@ -1019,19 +1021,22 @@ def generate_analytics_plot(profiles):
 def get_main_menu(chat_id=None):
     builder = InlineKeyboardBuilder()
     builder.row(
-        InlineKeyboardButton(text="📋 Свободные места", callback_data="slots_all")
-    )
-    builder.row(
-        InlineKeyboardButton(text="🚀 Комбо-пакеты", callback_data="slots_combo"),
-        InlineKeyboardButton(text="🏫 Станции ведущих", callback_data="stations_who")
-    )
-    builder.row(
-        InlineKeyboardButton(text="📚 Обучалки", callback_data="study_menu"),
-        InlineKeyboardButton(text="⚙️ Полезное", callback_data="osint_menu")
+        InlineKeyboardButton(text="📅 Запись на квесты", callback_data="booking_hub")
     )
     if chat_id and is_linked(chat_id):
         builder.row(
-            InlineKeyboardButton(text="👤 Профиль", callback_data="user_profile")
+            InlineKeyboardButton(text="👤 Мой профиль", callback_data="user_profile")
+        )
+    else:
+        builder.row(
+            InlineKeyboardButton(text="🔗 Привязать аккаунт", callback_data="link_start")
+        )
+    builder.row(
+        InlineKeyboardButton(text="💻 Технический раздел", callback_data="osint_menu")
+    )
+    if chat_id == ADMIN_ID:
+        builder.row(
+            InlineKeyboardButton(text="⚙️ Панель админа", callback_data="admin_mass_panel")
         )
     builder.row(
         InlineKeyboardButton(text="❓ Что это за бот?", callback_data="about_bot")
@@ -1056,7 +1061,12 @@ def get_pagination_keyboard(current_page, total_pages, mode_prefix, chat_id=None
             builder.row(InlineKeyboardButton(text="📝 Записать на комбо", callback_data=f"book_combo_{current_page}"))
     if mode_prefix == "page_all":
         builder.row(InlineKeyboardButton(text="⚙️ Фильтры", callback_data=f"filters_slots_{current_page}"))
-    builder.row(InlineKeyboardButton(text="↩️ Главное меню", callback_data="main_menu"))
+    
+    if mode_prefix == "page_st":
+        back_target = "osint_menu"
+    else:
+        back_target = "booking_hub"
+    builder.row(InlineKeyboardButton(text="↩️ Назад", callback_data=back_target))
     return builder.as_markup()
 
 
@@ -1697,6 +1707,43 @@ async def go_to_main_menu(callback: CallbackQuery):
     await callback.message.edit_text("🛸 *Главное меню J-GET*\n\nВыбери нужный раздел:", 
                                      parse_mode="Markdown", reply_markup=get_main_menu(cid))
 
+@router.callback_query(F.data == "booking_hub")
+async def handle_booking_hub(callback: CallbackQuery):
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        InlineKeyboardButton(text="📋 Свободные места", callback_data="slots_all"),
+        InlineKeyboardButton(text="🚀 Комбо-пакеты", callback_data="slots_combo")
+    )
+    builder.row(
+        InlineKeyboardButton(text="📚 Обучалки", callback_data="study_menu"),
+        InlineKeyboardButton(text="↩️ Главное меню", callback_data="main_menu")
+    )
+    await callback.message.edit_text(
+        "📅 *ЗАПИСЬ НА КВЕСТЫ*\n\n"
+        "Выбери нужный раздел для просмотра свободных мест, подбора комбо-маршрутов или изучения обучающих материалов:",
+        parse_mode="Markdown",
+        reply_markup=builder.as_markup()
+    )
+
+@router.callback_query(F.data == "tech_mass_panel")
+async def handle_tech_mass_panel(callback: CallbackQuery):
+    cid = callback.message.chat.id
+    active_count = min(10, len(CACHED_ACTIVE_BOT_IDS))
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        InlineKeyboardButton(text="📆 Эта неделя (10 ботов)", callback_data="tech_run_current"),
+        InlineKeyboardButton(text="📆 След. неделя (10 ботов)", callback_data="tech_run_next")
+    )
+    builder.row(InlineKeyboardButton(text="↩️ Назад", callback_data="osint_menu"))
+    await callback.message.edit_text(
+        f"🤖 *Авто-штурм ботами (Раздел Технарей)*\n\n"
+        f"Вы можете запустить высокоскоростное параллельное распределение активных ботов по свободным позициям. "
+        f"Под вашим управлением: *до 10 ботов* (всего сейчас активно: `{len(CACHED_ACTIVE_BOT_IDS)}`).\n\n"
+        f"Выберите целевой период:",
+        parse_mode="Markdown",
+        reply_markup=builder.as_markup()
+    )
+
 @router.callback_query(F.data.in_(["slots_all", "slots_combo", "stations_who", "osint_menu"]))
 async def handle_menus(callback: CallbackQuery):
     cid = callback.message.chat.id
@@ -1708,7 +1755,7 @@ async def handle_menus(callback: CallbackQuery):
     if action == "slots_all":
         pages, sorted_dates = chunk_by_days(data, chat_id=cid)
         if not pages:
-            await callback.message.edit_text("🟢 На этой неделе свободных мест нет.", reply_markup=get_back_btn())
+            await callback.message.edit_text("🟢 На этой неделе свободных мест нет.", reply_markup=get_back_btn("booking_hub"))
             return
         initial_page = find_initial_page(sorted_dates)
         USER_PAGES[cid] = initial_page
@@ -1716,7 +1763,7 @@ async def handle_menus(callback: CallbackQuery):
     elif action == "slots_combo":
         pages, sorted_dates, combos_data = chunk_combos(data, chat_id=cid)
         if not pages:
-            await callback.message.edit_text("🟢 Нет доступных комбо-цепочек на этой неделе.", reply_markup=get_back_btn())
+            await callback.message.edit_text("🟢 Нет доступных комбо-цепочек на этой неделе.", reply_markup=get_back_btn("booking_hub"))
             return
         initial_page = find_initial_page(sorted_dates)
         USER_PAGES[cid] = initial_page
@@ -1725,7 +1772,7 @@ async def handle_menus(callback: CallbackQuery):
     elif action == "stations_who":
         pages, sorted_dates = chunk_stations(data)
         if not pages:
-            await callback.message.edit_text("🟢 Список станций пуст.", reply_markup=get_back_btn())
+            await callback.message.edit_text("🟢 Список станций пуст.", reply_markup=get_back_btn("osint_menu"))
             return
         initial_page = find_initial_page(sorted_dates)
         USER_PAGES[cid] = initial_page
@@ -1733,21 +1780,28 @@ async def handle_menus(callback: CallbackQuery):
     elif action == "osint_menu":
         builder = InlineKeyboardBuilder()
         builder.row(
+            InlineKeyboardButton(text="🏫 Станции ведущих", callback_data="stations_who"),
+            InlineKeyboardButton(text="🔍 ОСИНТ Поиск", callback_data="osint_search_mode")
+        )
+        builder.row(
             InlineKeyboardButton(text="🏃 Выплаты: Ведущие", callback_data="osint_rates_players"),
             InlineKeyboardButton(text="👑 Выплаты: Главари", callback_data="osint_rates_leaders")
         )
         builder.row(
             InlineKeyboardButton(text="🏆 Рейтинг лидеров", callback_data="osint_tops"),
-            InlineKeyboardButton(text="📊 График выплат", callback_data="osint_chart")
+            InlineKeyboardButton(text="🎲 Фановые рекорды", callback_data="osint_fun")
         )
         builder.row(
-            InlineKeyboardButton(text="🎲 Фановые рекорды", callback_data="osint_fun"),
-            InlineKeyboardButton(text="🔍 ОСИНТ Поиск", callback_data="osint_search_mode")
+            InlineKeyboardButton(text="📊 График выплат", callback_data="osint_chart"),
+            InlineKeyboardButton(text="🤖 Авто-штурм ботами", callback_data="tech_mass_panel")
         )
-        if cid == ADMIN_ID:
-            builder.row(InlineKeyboardButton(text="🤖 Авто-штурм ботами", callback_data="admin_mass_panel"))
         builder.row(InlineKeyboardButton(text="↩️ Главное меню", callback_data="main_menu"))
-        await callback.message.edit_text("⚙️ *РАЗДЕЛ ПОЛЕЗНОЕ И АНАЛИТИКА*\nВыбери необходимый модуль:", parse_mode="Markdown", reply_markup=builder.as_markup())
+        await callback.message.edit_text(
+            "💻 *ТЕХНИЧЕСКИЙ РАЗДЕЛ (ДЛЯ ТЕХНАРЕЙ)*\n\n"
+            "Здесь собраны инструменты продвинутой статистики, аналитики выплат и управления ботами:",
+            parse_mode="Markdown",
+            reply_markup=builder.as_markup()
+        )
 
 
 
@@ -1789,7 +1843,7 @@ async def handle_admin_panel(callback: CallbackQuery):
     builder.row(
         InlineKeyboardButton(text=sched_btn_text, callback_data="toggle_saturday_scheduler")
     )
-    builder.row(InlineKeyboardButton(text="↩️ Назад", callback_data="osint_menu"))
+    builder.row(InlineKeyboardButton(text="↩️ Главное меню", callback_data="main_menu"))
     await callback.message.edit_text(
         f"🤖 *Авто-штурм ботами*\n\n"
         f"📊 *Статус сессий ботов:*\n"
@@ -1815,7 +1869,7 @@ async def handle_toggle_scheduler(callback: CallbackQuery):
     await callback.answer("Статус планировщика обновлен!", show_alert=True)
     await handle_admin_panel(callback)
 
-async def update_progress_msg(bot, chat_id, msg_id, tracker, final=False):
+async def update_progress_msg(bot, chat_id, msg_id, tracker, final=False, back_target="osint_menu"):
     now_ts = asyncio.get_event_loop().time()
     if not final and (now_ts - tracker.last_update < 1.8):
         return
@@ -1829,7 +1883,7 @@ async def update_progress_msg(bot, chat_id, msg_id, tracker, final=False):
     )
     if final:
         text += "🏁 *Штурм завершен!*\n⏱️ Все доступные позиции заняты. Запущен скрытый фоновый кулдаун (14 минут) — автоматическая очистка всех зарегистрированных мест произойдет без лишнего спама."
-        markup = get_back_btn("osint_menu")
+        markup = get_back_btn(back_target)
     else:
         text += "⏳ Выполняю параллельную высокоскоростную запись..."
         markup = None
@@ -1841,9 +1895,10 @@ async def update_progress_msg(bot, chat_id, msg_id, tracker, final=False):
     except Exception:
         pass
 
-async def run_all_and_cooldown(tasks, bot, chat_id, msg_id, tracker, tab_week, active_ids):
-    await asyncio.gather(*tasks)
-    await update_progress_msg(bot, chat_id, msg_id, tracker, final=True)
+async def run_all_and_cooldown(tasks, bot, chat_id, msg_id, tracker, tab_week, active_ids, back_target="osint_menu"):
+    async with STORM_LOCK:
+        await asyncio.gather(*tasks)
+        await update_progress_msg(bot, chat_id, msg_id, tracker, final=True, back_target=back_target)
     await asyncio.sleep(840)
     for i in active_ids:
         cookies, token = load_account_auth(i)
@@ -1863,16 +1918,25 @@ async def run_all_and_cooldown(tasks, bot, chat_id, msg_id, tracker, tab_week, a
             except Exception: pass
             await asyncio.sleep(0.4)
 
-@router.callback_query(F.data.startswith("mass_run_"))
+@router.callback_query(F.data.startswith("mass_run_") | F.data.startswith("tech_run_"))
 async def run_mass_automation(callback: CallbackQuery, bot: Bot):
     cid = callback.message.chat.id
-    if cid != ADMIN_ID:
+    is_tech = callback.data.startswith("tech_run_")
+    
+    if not is_tech and cid != ADMIN_ID:
         await callback.answer("⭐ Это премиум функция", show_alert=True)
         return
+        
     tab_week = callback.data.split("_")[2]
     msg_id = callback.message.message_id
     
-    active_ids = CACHED_ACTIVE_BOT_IDS
+    if is_tech:
+        active_ids = CACHED_ACTIVE_BOT_IDS[:10]
+        back_target = "tech_mass_panel"
+    else:
+        active_ids = CACHED_ACTIVE_BOT_IDS
+        back_target = "admin_mass_panel"
+        
     active_count = len(active_ids)
     
     if active_count == 0:
@@ -1880,15 +1944,22 @@ async def run_mass_automation(callback: CallbackQuery, bot: Bot):
             chat_id=cid, message_id=msg_id,
             text=f"❌ *Штурм отменен*\n\nНи одна сессия ботов не активна. Проверьте файлы в `accounts/`.",
             parse_mode="Markdown",
-            reply_markup=get_back_btn("admin_mass_panel")
+            reply_markup=get_back_btn(back_target)
         )
         return
 
-    await bot.edit_message_text(
-        chat_id=cid, message_id=msg_id,
-        text=f"⏳ Загружаю расписание для активных ботов ({active_count})...",
-        parse_mode="Markdown"
-    )
+    if STORM_LOCK.locked():
+        await bot.edit_message_text(
+            chat_id=cid, message_id=msg_id,
+            text="⏳ *Вся сеть занята*\n\nДругой авто-штурм уже выполняется. Ваш запрос поставлен в очередь ожидания...",
+            parse_mode="Markdown"
+        )
+    else:
+        await bot.edit_message_text(
+            chat_id=cid, message_id=msg_id,
+            text=f"⏳ Загружаю расписание для активных ботов ({active_count})...",
+            parse_mode="Markdown"
+        )
 
     events = []
     headers = {"User-Agent": "Mozilla/5.0"}
@@ -1898,8 +1969,9 @@ async def run_mass_automation(callback: CallbackQuery, bot: Bot):
                 if r.status == 200: events = await r.json()
         except Exception: pass
     if not events:
-        await callback.message.edit_text("❌ Не удалось получить расписание с сервера. Попробуй позже.", reply_markup=get_back_btn("admin_mass_panel"))
+        await callback.message.edit_text("❌ Не удалось получить расписание с сервера. Попробуй позже.", reply_markup=get_back_btn(back_target))
         return
+        
     tracker = MassAutomationTracker(total=active_count)
     async def worker_task(account_id):
         cookies, token = load_account_auth(account_id)
@@ -1947,10 +2019,10 @@ async def run_mass_automation(callback: CallbackQuery, bot: Bot):
                                 else: tracker.failed += 1
                         except Exception: tracker.failed += 1
         tracker.processed += 1
-        await update_progress_msg(bot, cid, callback.message.message_id, tracker)
+        await update_progress_msg(bot, cid, callback.message.message_id, tracker, back_target=back_target)
 
     tasks = [worker_task(acc_id) for acc_id in active_ids]
-    asyncio.create_task(run_all_and_cooldown(tasks, bot, cid, callback.message.message_id, tracker, tab_week, active_ids))
+    asyncio.create_task(run_all_and_cooldown(tasks, bot, cid, callback.message.message_id, tracker, tab_week, active_ids, back_target))
 
 async def run_saturday_storm(bot: Bot, active_ids: list[int]):
     try:
@@ -2065,7 +2137,8 @@ async def run_saturday_storm(bot: Bot, active_ids: list[int]):
                             
         tracker.processed += 1
 
-    await asyncio.gather(*[worker_task(acc_id) for acc_id in active_ids])
+    async with STORM_LOCK:
+        await asyncio.gather(*[worker_task(acc_id) for acc_id in active_ids])
     
     report_text = (
         f"🏁 *Автоматическая запись завершена*\n\n"
