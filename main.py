@@ -30,7 +30,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 load_dotenv()
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-BOT_VERSION = "1.2.0.3"
+BOT_VERSION = "1.2.0.4"
 AUTH_FILE = "auth.json"
 LINKED_FILE = "linked_accounts.json"
 FILTERS_FILE = "user_filters.json"
@@ -632,10 +632,7 @@ def get_back_btn(target="main_menu"):
 def get_onboarding_keyboard():
     builder = InlineKeyboardBuilder()
     builder.row(InlineKeyboardButton(text="🔗 Привязать аккаунт", callback_data="link_start"))
-    builder.row(
-        InlineKeyboardButton(text="👤 Войти гостем", callback_data="link_skip"),
-        InlineKeyboardButton(text="❓ Зачем это?", callback_data="link_why")
-    )
+    builder.row(InlineKeyboardButton(text="❓ Зачем это?", callback_data="link_why"))
     return builder.as_markup()
 
 @router.message(F.text.startswith("/start"))
@@ -700,15 +697,6 @@ async def handle_link_back_onboarding(callback: CallbackQuery):
             "Выберите действие:",
             parse_mode="Markdown", reply_markup=get_onboarding_keyboard()
         )
-
-@router.callback_query(F.data == "link_skip")
-async def handle_link_skip(callback: CallbackQuery):
-    cid = callback.message.chat.id
-    USER_LINK_STATE.pop(cid, None)
-    await callback.message.edit_text(
-        "🛸 *Главное меню J-GET*\n\nВыбери нужный раздел:", 
-        parse_mode="Markdown", reply_markup=get_main_menu(cid)
-    )
 
 @router.callback_query(F.data == "link_why")
 async def handle_link_why(callback: CallbackQuery):
@@ -1136,8 +1124,17 @@ async def handle_show_password(callback: CallbackQuery, bot: Bot):
 async def go_to_main_menu(callback: CallbackQuery):
     cid = callback.message.chat.id
     USER_LINK_STATE.pop(cid, None)
-    await callback.message.edit_text("🛸 *Главное меню J-GET*\n\nВыбери нужный раздел:", 
-                                     parse_mode="Markdown", reply_markup=get_main_menu(cid))
+    if is_linked(cid):
+        await callback.message.edit_text("🛸 *Главное меню J-GET*\n\nВыбери нужный раздел:", 
+                                         parse_mode="Markdown", reply_markup=get_main_menu(cid))
+    else:
+        await callback.message.edit_text(
+            "🛸 *Добро пожаловать в J-GET!*\n\n"
+            "Привяжите аккаунт сайта jget-events.ru чтобы получить полный доступ "
+            "к автоматической записи, уведомлениям и управлению профилем.\n\n"
+            "Выберите действие:",
+            parse_mode="Markdown", reply_markup=get_onboarding_keyboard()
+        )
 
 async def run_saturday_autobooking_precheck(bot: Bot):
     print(f"[{datetime.now().strftime('%H:%M:%S')}] Запуск Saturday Auto-booking Precheck...")
