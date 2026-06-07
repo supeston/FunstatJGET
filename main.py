@@ -1865,6 +1865,91 @@ async def handle_admin_panel(callback: CallbackQuery):
     except Exception:
         pass
         
+    # --- 1. Fetch live bot account statistics from API ---
+    bot_token = None
+    if os.path.exists(AUTH_FILE):
+        try:
+            with open(AUTH_FILE, 'r', encoding='utf-8') as f:
+                auth_data = json.load(f)
+            for origin in auth_data.get("origins", []):
+                for item in origin.get("localStorage", []):
+                    if item.get("name") == "token":
+                        bot_token = item.get("value")
+                        break
+        except Exception:
+            pass
+
+    bot_profile_str = ""
+    if bot_token:
+        profile_data, err = await api_get_profile(bot_token)
+        if profile_data:
+            stats = profile_data.get("stats", {})
+            user_info = profile_data.get("user", {})
+            bot_first = user_info.get("first_name", "")
+            bot_last = user_info.get("last_name", "")
+            bot_name = f"{bot_first} {bot_last}".strip() or user_info.get("phone", "Бот")
+            bot_id = user_info.get("user_id", "Н/Д")
+            
+            conducted = stats.get("conducted", user_info.get("conducted_count", 0))
+            cancellations = stats.get("cancellations", user_info.get("cancellation_count", 0))
+            is_leader = user_info.get("is_leader", False)
+            is_experienced = user_info.get("is_experienced", False)
+            
+            roles = []
+            if is_leader: roles.append("👑 Ведущий")
+            if is_experienced: roles.append("⭐ Опытный")
+            role_str = ", ".join(roles) if roles else "🏃 Игрок"
+            
+            bot_profile_str = (
+                f"\n👤 *Профиль бота в J-GET:*\n"
+                f"• Имя: *{bot_name}* (ID: {bot_id})\n"
+                f"• Статус: *{role_str}*\n"
+                f"• Проведено смен: *{conducted}*\n"
+                f"• Отменено смен: *{cancellations}*\n"
+            )
+
+    # --- 2. Calculate cached events summary ---
+    total_booked_slots = 0
+    total_free_slots = 0
+    cat_counts = {}
+    school_slots = {}
+    
+    if GLOBAL_CACHED_DATA:
+        for e in GLOBAL_CACHED_DATA:
+            raw_cat = e.get("event_type_name", "")
+            title = e.get("title", "")
+            cat = normalize_category(raw_cat, title)
+            clean_cat = clean_category_name(cat)
+            
+            free_here = sum(1 for s in e.get("available_stations", []) if s.get("is_available"))
+            booked_here = len(e.get("participants", []))
+            
+            total_booked_slots += booked_here
+            total_free_slots += free_here
+            
+            # Category counts
+            if clean_cat not in cat_counts:
+                cat_counts[clean_cat] = {"booked": 0, "free": 0}
+            cat_counts[clean_cat]["booked"] += booked_here
+            cat_counts[clean_cat]["free"] += free_here
+            
+            # School counts
+            sch = format_school_name(title)
+            if sch and free_here > 0:
+                school_slots[sch] = school_slots.get(sch, 0) + free_here
+                
+    cat_lines = []
+    for cat_name, counts in sorted(cat_counts.items()):
+        total = counts["booked"] + counts["free"]
+        cat_lines.append(f"  └ {cat_name}: *{total}* слотов (свободно: *{counts['free']}*, занято: *{counts['booked']}*)")
+    cat_breakdown = "\n".join(cat_lines) if cat_lines else "  └ Нет данных"
+    
+    top_schools = sorted(school_slots.items(), key=lambda x: x[1], reverse=True)[:3]
+    school_lines = []
+    for sch_name, free_cnt in top_schools:
+        school_lines.append(f"  └ {sch_name}: *{free_cnt}* своб. слотов")
+    school_breakdown = "\n".join(school_lines) if school_lines else "  └ Нет свободных слотов"
+
     text = (
         f"👑 *ПАНЕЛЬ АДМИНИСТРАТОРА*\n\n"
         f"📊 *Статистика бота:*\n"
@@ -1873,6 +1958,13 @@ async def handle_admin_panel(callback: CallbackQuery):
         f"• Активных автозаписей: *{active_autobooking}*\n"
         f"• Смен в кэше API: *{cached_events_count}*\n"
         f"• Потребление RAM: *{ram_str}*\n"
+        f"{bot_profile_str}\n"
+        f"📅 *Сводка Quest API ({cached_events_count} смен):*\n"
+        f"• Всего мест/слотов: *{total_booked_slots + total_free_slots}*\n"
+        f"  └ Свободно (для записи): *{total_free_slots}*\n"
+        f"  └ Занято (записано): *{total_booked_slots}*\n"
+        f"• Слоты по категориям:\n{cat_breakdown}\n"
+        f"• Топ школ по свободным слотам:\n{school_breakdown}\n"
     )
     
     builder = InlineKeyboardBuilder()
