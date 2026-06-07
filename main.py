@@ -4,6 +4,7 @@ import json
 import random
 import asyncio
 import aiohttp
+import gc
 from datetime import datetime, timedelta, timezone
 import urllib.parse
 
@@ -13,7 +14,6 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 BOT_TOKEN = "8593726524:AAG3ofTD1LXZTPt7nLD2MFOzBEKL_ELemqU"
 AUTH_FILE = "auth.json"
-ACCOUNTS_DIR = "accounts"
 LINKED_FILE = "linked_accounts.json"
 FILTERS_FILE = "user_filters.json"
 URL_BOOK = "https://jget-events.ru/api/bookings/"
@@ -358,6 +358,44 @@ def load_cookies_from_auth():
     except Exception:
         return None
 
+def clean_event_for_cache(event):
+    cleaned = {
+        "id": event.get("id"),
+        "date": event.get("date"),
+        "title": event.get("title"),
+        "start_time": event.get("start_time"),
+        "end_time": event.get("end_time"),
+        "event_type_name": event.get("event_type_name"),
+    }
+    
+    participants = []
+    for p in event.get("participants", []):
+        cleaned_p = {
+            "first_name": p.get("first_name", ""),
+            "last_name": p.get("last_name", ""),
+            "as_leader": p.get("as_leader"),
+            "attended": p.get("attended", True),
+            "late": p.get("late", False),
+        }
+        st = p.get("station")
+        if isinstance(st, dict):
+            cleaned_p["station"] = {"name": st.get("name", "")}
+        else:
+            cleaned_p["station"] = None
+        participants.append(cleaned_p)
+    cleaned["participants"] = participants
+    
+    avail_stations = []
+    for s in event.get("available_stations", []):
+        avail_stations.append({
+            "id": s.get("id"),
+            "name": s.get("name"),
+            "is_available": s.get("is_available")
+        })
+    cleaned["available_stations"] = avail_stations
+    
+    return cleaned
+
 async def fetch_all_data():
     cookies = load_cookies_from_auth()
     if not cookies:
@@ -377,8 +415,14 @@ async def fetch_all_data():
                 if r2.status != 200:
                     return None, f"Ошибка API (next): статус {r2.status}"
                 res2 = await r2.json()
+            
             merged = {e["id"]: e for e in (res1 + res2)}.values()
-            return list(merged), None
+            cleaned = [clean_event_for_cache(e) for e in merged]
+            
+            # Explicitly collect garbage to free memory immediately after parsing large JSON responses
+            gc.collect()
+            
+            return cleaned, None
         except Exception as e:
             return None, f"Ошибка выполнения HTTP-запроса: {e}"
 
@@ -447,6 +491,9 @@ async def background_cache_updater():
             print(f"[{datetime.now().strftime('%H:%M:%S')}] Глобальный кэш успешно обновлен.")
         else:
             print(f"[{datetime.now().strftime('%H:%M:%S')}] Ошибка фонового обновления: {err}")
+        
+        # Periodic garbage collection to ensure minimized RAM footprint
+        gc.collect()
         await asyncio.sleep(30)
 
 async def background_weekday_autobooking_loop(bot: Bot):
@@ -1737,6 +1784,4 @@ async def main():
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
-    if not os.path.exists(ACCOUNTS_DIR):
-        os.makedirs(ACCOUNTS_DIR)
     asyncio.run(main())
