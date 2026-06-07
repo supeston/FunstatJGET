@@ -16,6 +16,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 load_dotenv()
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
+BOT_VERSION = "1.2.0.2"
 AUTH_FILE = "auth.json"
 LINKED_FILE = "linked_accounts.json"
 FILTERS_FILE = "user_filters.json"
@@ -1865,7 +1866,43 @@ async def handle_admin_panel(callback: CallbackQuery):
     except Exception:
         pass
         
-    # --- 1. Fetch live bot account statistics from API ---
+    # --- 1. Calculate next Saturday countdowns in Moscow time ---
+    now_msk = get_msk_now()
+    days_until_saturday = (5 - now_msk.weekday()) % 7
+    
+    # Storm countdown (Saturday 12:00 MSK)
+    next_storm = now_msk.replace(hour=12, minute=0, second=0, microsecond=0) + timedelta(days=days_until_saturday)
+    if next_storm <= now_msk:
+        next_storm += timedelta(days=7)
+    time_to_storm = next_storm - now_msk
+    days_s = time_to_storm.days
+    hours_s, remainder_s = divmod(time_to_storm.seconds, 3600)
+    minutes_s, _ = divmod(remainder_s, 60)
+    storm_countdown = f"{days_s}д {hours_s}ч {minutes_s}м"
+    
+    # Precheck countdown (Saturday 11:50 MSK)
+    next_precheck = now_msk.replace(hour=11, minute=50, second=0, microsecond=0) + timedelta(days=days_until_saturday)
+    if next_precheck <= now_msk:
+        next_precheck += timedelta(days=7)
+    time_to_precheck = next_precheck - now_msk
+    days_p = time_to_precheck.days
+    hours_p, remainder_p = divmod(time_to_precheck.seconds, 3600)
+    minutes_p, _ = divmod(remainder_p, 60)
+    precheck_countdown = f"{days_p}д {hours_p}ч {minutes_p}м"
+
+    # --- 2. Build list of registered users and auto-booking statuses ---
+    linked_list = []
+    for uid_str, acc in linked_accs.items():
+        name = acc.get("name", "Неизвестно")
+        user_f = filters.get(uid_str, {})
+        is_active = user_f.get("auto_booking_active", False)
+        mode = user_f.get("auto_booking_mode", "confirm")
+        active_symbol = "🟢" if is_active else "🔴"
+        mode_symbol = "⚡" if mode == "auto" else "⏳"
+        linked_list.append(f"  ├ {active_symbol} {mode_symbol} {name} (ID: {uid_str})")
+    linked_users_str = "\n".join(linked_list) if linked_list else "  └ Нет привязанных аккаунтов"
+
+    # --- 3. Fetch live bot account statistics from API ---
     bot_token = None
     if os.path.exists(AUTH_FILE):
         try:
@@ -1908,7 +1945,7 @@ async def handle_admin_panel(callback: CallbackQuery):
                 f"• Отменено смен: *{cancellations}*\n"
             )
 
-    # --- 2. Calculate cached events summary ---
+    # --- 4. Calculate cached events summary ---
     total_booked_slots = 0
     total_free_slots = 0
     cat_counts = {}
@@ -1951,13 +1988,17 @@ async def handle_admin_panel(callback: CallbackQuery):
     school_breakdown = "\n".join(school_lines) if school_lines else "  └ Нет свободных слотов"
 
     text = (
-        f"👑 *ПАНЕЛЬ АДМИНИСТРАТОРА*\n\n"
+        f"👑 *ПАНЕЛЬ АДМИНИСТРАТОРА* (v{BOT_VERSION})\n\n"
         f"📊 *Статистика бота:*\n"
         f"• Привязанных аккаунтов: *{total_linked}*\n"
         f"• Пользователей с фильтрами: *{total_filters}*\n"
         f"• Активных автозаписей: *{active_autobooking}*\n"
         f"• Смен в кэше API: *{cached_events_count}*\n"
         f"• Потребление RAM: *{ram_str}*\n"
+        f"\n👥 *Список пользователей:*\n{linked_users_str}\n"
+        f"\n⏳ *До субботнего штурма:*\n"
+        f"• Предпроверка (11:50 MSK): *{precheck_countdown}*\n"
+        f"• Автозапись (12:00 MSK): *{storm_countdown}*\n"
         f"{bot_profile_str}\n"
         f"📅 *Сводка Quest API ({cached_events_count} смен):*\n"
         f"• Всего мест/слотов: *{total_booked_slots + total_free_slots}*\n"
