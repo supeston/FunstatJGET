@@ -1,4 +1,18 @@
 import os
+import sys
+import subprocess
+
+if os.environ.get("PYTHON_UPDATED") != "true":
+    print("[CD-Система] Проверка обновлений на GitHub...")
+    try:
+        subprocess.run(["git", "fetch", "origin", "main"], check=True)
+        subprocess.run(["git", "reset", "--hard", "origin/main"], check=True)
+        print("[CD-Система] Код успешно обновлен до последней версии!")
+        os.environ["PYTHON_UPDATED"] = "true"
+        os.execv(sys.executable, [sys.executable] + sys.argv)
+    except Exception as e:
+        print(f"[CD-Система] Ошибка автоапдейта (запуск текущей версии): {e}")
+
 import re
 import json
 import random
@@ -16,7 +30,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 load_dotenv()
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-BOT_VERSION = "1.2.0.2"
+BOT_VERSION = "1.2.0.3"
 AUTH_FILE = "auth.json"
 LINKED_FILE = "linked_accounts.json"
 FILTERS_FILE = "user_filters.json"
