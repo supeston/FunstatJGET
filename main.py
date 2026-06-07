@@ -7,12 +7,15 @@ import aiohttp
 import gc
 from datetime import datetime, timedelta, timezone
 import urllib.parse
+from dotenv import load_dotenv
 
 from aiogram import Bot, Dispatcher, F, Router
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, Message, CallbackQuery
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-BOT_TOKEN = "8593726524:AAG3ofTD1LXZTPt7nLD2MFOzBEKL_ELemqU"
+load_dotenv()
+
+BOT_TOKEN = os.getenv("BOT_TOKEN")
 AUTH_FILE = "auth.json"
 LINKED_FILE = "linked_accounts.json"
 FILTERS_FILE = "user_filters.json"
