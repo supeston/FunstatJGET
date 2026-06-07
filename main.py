@@ -1308,10 +1308,11 @@ async def run_saturday_user_autobooking(bot: Bot):
                     f"{status_symbol} {t['date']} {t['time']} | {t['school']} | Станция {t['station_num']} {status_reason}"
                 )
                 
+            report_lines_joined = "\n".join(report_lines)
             report_text = (
                 f"🤖 *ОТЧЕТ ОБ АВТОЗАПИСИ (Суббота 12:00)*\n\n"
                 f"Бот завершил попытку автозаписи на подтвержденные смены:\n\n"
-                f"{'\n'.join(report_lines)}\n\n"
+                f"{report_lines_joined}\n\n"
                 f"Записано смен: *{success_count}* из *{len(targets)}*."
             )
             try:
