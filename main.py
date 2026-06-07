@@ -589,6 +589,10 @@ def get_main_menu(chat_id=None):
         builder.row(
             InlineKeyboardButton(text="🤖 Автозапись", callback_data="auto_booking_menu")
         )
+    if chat_id and chat_id == ADMIN_ID:
+        builder.row(
+            InlineKeyboardButton(text="👑 Админ-панель", callback_data="admin_panel")
+        )
     if chat_id and is_linked(chat_id):
         builder.row(
             InlineKeyboardButton(text="👤 Профиль", callback_data="user_profile")
@@ -1764,6 +1768,55 @@ async def process_text_input(message: Message, bot: Bot):
             reply_markup=builder.as_markup()
         )
         return
+
+
+@router.callback_query(F.data == "admin_panel")
+async def handle_admin_panel(callback: CallbackQuery):
+    cid = callback.message.chat.id
+    if cid != ADMIN_ID:
+        await callback.answer("У вас нет прав администратора!", show_alert=True)
+        return
+    try: await callback.answer()
+    except Exception: pass
+    
+    linked_accs = load_linked_accounts()
+    filters = load_all_filters()
+    
+    total_linked = len(linked_accs)
+    total_filters = len(filters)
+    
+    active_autobooking = 0
+    for user_f in filters.values():
+        if user_f.get("auto_booking_active", False):
+            active_autobooking += 1
+            
+    cached_events_count = len(GLOBAL_CACHED_DATA) if GLOBAL_CACHED_DATA else 0
+    
+    ram_str = "Н/Д"
+    try:
+        with open('/proc/self/status', 'r') as f:
+            for line in f:
+                if line.startswith('VmRSS:'):
+                    parts = line.split()
+                    ram_str = f"{float(parts[1]) / 1024:.1f} MB"
+                    break
+    except Exception:
+        pass
+        
+    text = (
+        f"👑 *ПАНЕЛЬ АДМИНИСТРАТОРА*\n\n"
+        f"📊 *Статистика бота:*\n"
+        f"• Привязанных аккаунтов: *{total_linked}*\n"
+        f"• Пользователей с фильтрами: *{total_filters}*\n"
+        f"• Активных автозаписей: *{active_autobooking}*\n"
+        f"• Смен в кэше API: *{cached_events_count}*\n"
+        f"• Потребление RAM: *{ram_str}*\n"
+    )
+    
+    builder = InlineKeyboardBuilder()
+    builder.row(InlineKeyboardButton(text="🔄 Обновить", callback_data="admin_panel"))
+    builder.row(InlineKeyboardButton(text="↩️ Главное меню", callback_data="main_menu"))
+    await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=builder.as_markup())
 
 
 async def main():
