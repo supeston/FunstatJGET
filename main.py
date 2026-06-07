@@ -573,35 +573,46 @@ async def background_weekday_autobooking_loop(bot: Bot):
                             if not allowed_nums:
                                 continue
                                 
-                            for s in ev.get("available_stations", []):
-                                if s.get("is_available"):
-                                    num = get_station_num(s.get("name"))
-                                    if num in allowed_nums:
-                                        payload = {"event": ev.get("id"), "station": s.get("id")}
-                                        try:
-                                            async with session.post(URL_BOOK, json=payload, timeout=5) as r:
-                                                if r.status in [200, 201]:
-                                                    try:
-                                                        dt = datetime.strptime(ev_date_str, "%Y-%m-%d")
-                                                        day_w = DAYS_RU.get(dt.weekday(), "")
-                                                        mon = MONTHS_RU.get(dt.month, "")
-                                                        date_fmt = f"{dt.day} {mon} ({day_w})"
-                                                    except Exception:
-                                                        date_fmt = ev_date_str
-                                                    
-                                                    alert_text = (
-                                                        f"🤖 *АВТОЗАПИСЬ: УСПЕШНЫЙ ПЕРЕХВАТ!* 🚀\n\n"
-                                                        f"Бот автоматически перехватил и записал вас на смену:\n"
-                                                        f"📅 *{date_fmt}* | ⏱️ *{ev.get('start_time')[:5]}-{ev.get('end_time')[:5]}*\n"
-                                                        f"🏫 Школа: *{school_name}*\n"
-                                                        f"🎯 {clean_cat} | Станция {num}"
-                                                    )
-                                                    await bot.send_message(chat_id=cid, text=alert_text, parse_mode="Markdown")
-                                                elif r.status == 400:
-                                                    pass
-                                        except Exception as e:
-                                            print(f"[!] Error in background booking: {e}")
-                                        await asyncio.sleep(0.5)
+                            # Find the highest priority available station
+                            matched_s = None
+                            matched_num = None
+                            for target_num in allowed_nums:
+                                for s in ev.get("available_stations", []):
+                                    if s.get("is_available"):
+                                        num = get_station_num(s.get("name"))
+                                        if num == target_num:
+                                            matched_s = s
+                                            matched_num = num
+                                            break
+                                if matched_s:
+                                    break
+                                    
+                            if matched_s:
+                                payload = {"event": ev.get("id"), "station": matched_s.get("id")}
+                                try:
+                                    async with session.post(URL_BOOK, json=payload, timeout=5) as r:
+                                        if r.status in [200, 201]:
+                                            try:
+                                                dt = datetime.strptime(ev_date_str, "%Y-%m-%d")
+                                                day_w = DAYS_RU.get(dt.weekday(), "")
+                                                mon = MONTHS_RU.get(dt.month, "")
+                                                date_fmt = f"{dt.day} {mon} ({day_w})"
+                                            except Exception:
+                                                date_fmt = ev_date_str
+                                            
+                                            alert_text = (
+                                                f"🤖 *АВТОЗАПИСЬ: УСПЕШНЫЙ ПЕРЕХВАТ!* 🚀\n\n"
+                                                f"Бот автоматически перехватил и записал вас на смену:\n"
+                                                f"📅 *{date_fmt}* | ⏱️ *{ev.get('start_time')[:5]}-{ev.get('end_time')[:5]}*\n"
+                                                f"🏫 Школа: *{school_name}*\n"
+                                                f"🎯 {clean_cat} | Станция {matched_num}"
+                                            )
+                                            await bot.send_message(chat_id=cid, text=alert_text, parse_mode="Markdown")
+                                        elif r.status == 400:
+                                            pass
+                                except Exception as e:
+                                    print(f"[!] Error in background booking: {e}")
+                                await asyncio.sleep(0.5)
         except Exception as ex:
             print(f"[!] Error in background weekday loop: {ex}")
         await asyncio.sleep(30)
@@ -1185,19 +1196,29 @@ async def run_saturday_autobooking_precheck(bot: Bot):
             if not allowed_nums:
                 continue
                 
-            for s in ev.get("available_stations", []):
-                if s.get("is_available"):
-                    num = get_station_num(s.get("name"))
-                    if num in allowed_nums:
-                        matches.append({
-                            "event_id": ev.get("id"),
-                            "station_id": s.get("id"),
-                            "date": ev_date_str,
-                            "time": f"{ev.get('start_time')[:5]}-{ev.get('end_time')[:5]}",
-                            "school": school_name,
-                            "category": clean_cat,
-                            "station_num": num
-                        })
+            matched_s = None
+            matched_num = None
+            for target_num in allowed_nums:
+                for s in ev.get("available_stations", []):
+                    if s.get("is_available"):
+                        num = get_station_num(s.get("name"))
+                        if num == target_num:
+                            matched_s = s
+                            matched_num = num
+                            break
+                if matched_s:
+                    break
+                    
+            if matched_s:
+                matches.append({
+                    "event_id": ev.get("id"),
+                    "station_id": matched_s.get("id"),
+                    "date": ev_date_str,
+                    "time": f"{ev.get('start_time')[:5]}-{ev.get('end_time')[:5]}",
+                    "school": school_name,
+                    "category": clean_cat,
+                    "station_num": matched_num
+                })
                         
         if not matches:
             try:
@@ -1315,19 +1336,29 @@ async def run_saturday_user_autobooking(bot: Bot):
                     allowed_nums = user_stations.get(clean_cat, [])
                     if not allowed_nums:
                         continue
-                    for s in ev.get("available_stations", []):
-                        if s.get("is_available"):
-                            num = get_station_num(s.get("name"))
-                            if num in allowed_nums:
-                                matches.append({
-                                    "event_id": ev.get("id"),
-                                    "station_id": s.get("id"),
-                                    "date": ev_date_str,
-                                    "time": f"{ev.get('start_time')[:5]}-{ev.get('end_time')[:5]}",
-                                    "school": school_name,
-                                    "category": clean_cat,
-                                    "station_num": num
-                                })
+                    matched_s = None
+                    matched_num = None
+                    for target_num in allowed_nums:
+                        for s in ev.get("available_stations", []):
+                            if s.get("is_available"):
+                                num = get_station_num(s.get("name"))
+                                if num == target_num:
+                                    matched_s = s
+                                    matched_num = num
+                                    break
+                        if matched_s:
+                            break
+                            
+                    if matched_s:
+                        matches.append({
+                            "event_id": ev.get("id"),
+                            "station_id": matched_s.get("id"),
+                            "date": ev_date_str,
+                            "time": f"{ev.get('start_time')[:5]}-{ev.get('end_time')[:5]}",
+                            "school": school_name,
+                            "category": clean_cat,
+                            "station_num": matched_num
+                        })
                 if matches:
                     confirmed[cid_str] = matches
 
@@ -1481,7 +1512,9 @@ async def handle_auto_booking_menu(callback: CallbackQuery):
         f"ℹ️ *Статус автозаписи:* {status_str}\n"
         f"⚙️ *Режим записи:* {mode_display}\n"
         f"🏫 *Целевые школы:* _{schools_str}_\n"
-        f"🎯 *Фаворит-станции:* _{stations_str}_\n"
+        f"🎯 *Фаворит-станции:* _{stations_str}_\n\n"
+        f"📌 *Приоритет станций:* Бот записывает сначала на те станции, которые вы выбрали первыми. "
+        f"Если первая станция будет занята, бот автоматически попробует записать на вторую по приоритету и так далее."
     )
     builder = InlineKeyboardBuilder()
     toggle_btn_text = "🔴 Выключить автозапись" if active else "🟢 Включить автозапись"
@@ -1659,15 +1692,29 @@ async def render_category_stations_menu(callback: CallbackQuery, cat: str):
     row = []
     for idx, i in enumerate(station_nums):
         is_sel = i in selected_nums
-        btn_text = f"✅ {i}" if is_sel else str(i)
+        if is_sel:
+            p_idx = selected_nums.index(i) + 1
+            btn_text = f"✅ {i} ({p_idx})"
+        else:
+            btn_text = str(i)
         row.append(InlineKeyboardButton(text=btn_text, callback_data=f"auto_bk_num_{cat}_{i}"))
         if len(row) == 5 or idx == len(station_nums) - 1:
             builder.row(*row)
             row = []
             
     builder.row(InlineKeyboardButton(text="↩️ Назад к категориям", callback_data="auto_booking_select_stations"))
+    
+    priority_text = ""
+    if selected_nums:
+        priority_text = "📊 *Приоритет выбора:*\n"
+        for idx, num in enumerate(selected_nums, 1):
+            priority_text += f"  {idx}️⃣. Станция *{num}*\n"
+        priority_text += "\n"
+        
     await callback.message.edit_text(
-        f"🎯 *СТАНЦИИ ДЛЯ КАТЕГОРИИ: {cat}*\n\nВыберите номера станций, на которые вас нужно автоматически записывать:",
+        f"🎯 *СТАНЦИИ ДЛЯ КАТЕГОРИИ: {cat}*\n\n"
+        f"{priority_text}"
+        f"Нажимайте на номера станций для выбора. Порядок нажатия определяет их приоритет (первое нажатие — наивысший приоритет):",
         parse_mode="Markdown", reply_markup=builder.as_markup()
     )
 
