@@ -35,7 +35,6 @@ DIFFICULTY_DATA = {
     "Сокровища": {1: 25, 2: 20, 3: 30, 4: 40, 5: 30, 6: 45, 7: 15, 8: 50},
     "ПДД квест": {1: 75, 2: 55, 3: 65, 4: 35, 5: 50, 6: 40, 7: 35, 8: 15, 9: 35},
     "Дружба": {1: 40, 2: 25, 3: 45, 4: 30, 5: 35, 6: 20, 7: 25, 8: 30, 9: 35, 10: 30},
-    "Команда первых": {1: 40, 2: 25, 3: 45, 4: 30, 5: 35, 6: 20, 7: 25, 8: 15, 9: 35, 10: 30},
     "Школьный спасатель": {1: 55, 2: 65, 3: 45, 4: 50, 5: 30, 6: 70, 7: 35, 8: 40, 9: 20}
 }
 
@@ -250,10 +249,8 @@ def format_category_link(raw_name):
 def normalize_category(event_type_name, title=""):
     name_lower = event_type_name.lower()
     title_lower = title.lower()
-    if "дружба" in name_lower or "дружба" in title_lower:
+    if "дружба" in name_lower or "дружба" in title_lower or "перв" in name_lower:
         return "Дружба"
-    if "перв" in name_lower:
-        return "Команда первых"
     if "спас" in name_lower:
         return "Школьный спасатель"
     if "брилл" in name_lower:
@@ -1568,7 +1565,7 @@ async def handle_auto_booking_select_stations(callback: CallbackQuery):
     try: await callback.answer()
     except Exception: pass
     builder = InlineKeyboardBuilder()
-    categories = ["ПДД", "Спасатель", "Дружба", "Сокровища", "Бриллианты", "Команда первых"]
+    categories = ["ПДД", "Спасатель", "Дружба", "Сокровища", "Бриллианты"]
     for cat in categories:
         builder.row(InlineKeyboardButton(text=f"🎯 {cat}", callback_data=f"auto_bk_cat_{cat}"))
     builder.row(InlineKeyboardButton(text="↩️ Назад", callback_data="auto_booking_menu"))
