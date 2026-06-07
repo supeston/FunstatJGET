@@ -118,6 +118,8 @@ def get_auto_booking_settings(chat_id):
         user_f["auto_booking_active"] = False
     if "auto_booking_schools" not in user_f:
         user_f["auto_booking_schools"] = []
+    if "auto_booking_schools_exclude_mode" not in user_f:
+        user_f["auto_booking_schools_exclude_mode"] = False
     if "auto_booking_stations" not in user_f:
         user_f["auto_booking_stations"] = {}
     return user_f
@@ -539,8 +541,14 @@ async def background_weekday_autobooking_loop(bot: Bot):
                                 
                             title = ev.get("title", "")
                             school_name = format_school_name(title)
-                            if user_schools and school_name not in user_schools:
-                                continue
+                            if user_schools:
+                                exclude_mode = settings.get("auto_booking_schools_exclude_mode", False)
+                                if exclude_mode:
+                                    if school_name in user_schools:
+                                        continue
+                                else:
+                                    if school_name not in user_schools:
+                                        continue
                                 
                             raw_cat = ev.get("event_type_name", "")
                             cat = normalize_category(raw_cat, title)
@@ -1150,8 +1158,14 @@ async def run_saturday_autobooking_precheck(bot: Bot):
                 
             title = ev.get("title", "")
             school_name = format_school_name(title)
-            if user_schools and school_name not in user_schools:
-                continue
+            if user_schools:
+                exclude_mode = settings.get("auto_booking_schools_exclude_mode", False)
+                if exclude_mode:
+                    if school_name in user_schools:
+                        continue
+                else:
+                    if school_name not in user_schools:
+                        continue
                 
             raw_cat = ev.get("event_type_name", "")
             cat = normalize_category(raw_cat, title)
@@ -1277,8 +1291,14 @@ async def run_saturday_user_autobooking(bot: Bot):
                         continue
                     title = ev.get("title", "")
                     school_name = format_school_name(title)
-                    if user_schools and school_name not in user_schools:
-                        continue
+                    if user_schools:
+                        exclude_mode = settings.get("auto_booking_schools_exclude_mode", False)
+                        if exclude_mode:
+                            if school_name in user_schools:
+                                continue
+                        else:
+                            if school_name not in user_schools:
+                                continue
                     raw_cat = ev.get("event_type_name", "")
                     cat = normalize_category(raw_cat, title)
                     clean_cat = clean_category_name(cat)
@@ -1433,7 +1453,12 @@ async def handle_auto_booking_menu(callback: CallbackQuery):
         mode_display = "С подтверждением (11:50)"
         
     schools = settings.get("auto_booking_schools", [])
-    schools_str = ", ".join(schools) if schools else "Все школы"
+    exclude_mode = settings.get("auto_booking_schools_exclude_mode", False)
+    if schools:
+        mode_prefix = "Все, кроме: " if exclude_mode else "Только: "
+        schools_str = mode_prefix + ", ".join(schools)
+    else:
+        schools_str = "Все школы"
     stations_data = settings.get("auto_booking_stations", {})
     stations_parts = []
     for cat, nums in stations_data.items():
@@ -1499,6 +1524,7 @@ async def handle_auto_booking_select_schools(callback: CallbackQuery):
     except Exception: pass
     settings = get_auto_booking_settings(cid)
     selected_schools = settings.get("auto_booking_schools", [])
+    exclude_mode = settings.get("auto_booking_schools_exclude_mode", False)
     
     schools_set = set()
     if GLOBAL_CACHED_DATA:
@@ -1510,16 +1536,42 @@ async def handle_auto_booking_select_schools(callback: CallbackQuery):
     schools_list = sorted(list(schools_set))
     
     builder = InlineKeyboardBuilder()
+    
+    # Mode toggle button at the top
+    mode_btn_text = "🚫 Режим: Исключить выбранные" if exclude_mode else "✅ Режим: Только выбранные"
+    builder.row(InlineKeyboardButton(text=mode_btn_text, callback_data="auto_bk_sch_mode_toggle"))
+    
     for idx, sch in enumerate(schools_list):
         is_sel = sch in selected_schools
         btn_text = f"✅ {sch}" if is_sel else sch
         builder.row(InlineKeyboardButton(text=btn_text, callback_data=f"auto_bk_sch_toggle_{idx}"))
+        
     builder.row(InlineKeyboardButton(text="↩️ Назад", callback_data="auto_booking_menu"))
     
+    mode_desc = (
+        "🚫 *Режим исключения:* бот будет ловить смены во ВСЕХ школах, *кроме* отмеченных ниже галочкой.\n\n"
+        if exclude_mode else
+        "✅ *Режим белого списка:* бот будет ловить смены *только* в отмеченных ниже школах (если ничего не отмечено — во всех).\n\n"
+    )
+    
     await callback.message.edit_text(
-        "🏫 *ВЫБОР ЦЕЛЕВЫХ ШКОЛ*\n\nОтметьте школы, в которых бот должен ловить смены:",
+        f"🏫 *ВЫБОР ЦЕЛЕВЫХ ШКОЛ*\n\n{mode_desc}Отметьте школы:",
         parse_mode="Markdown", reply_markup=builder.as_markup()
     )
+
+@router.callback_query(F.data == "auto_bk_sch_mode_toggle")
+async def handle_auto_booking_school_mode_toggle(callback: CallbackQuery):
+    cid = callback.message.chat.id
+    if cid not in [6871586046, 7932533408, 8556418483]:
+        await callback.answer("⭐ Это премиум функция", show_alert=True)
+        return
+    try: await callback.answer()
+    except Exception: pass
+    settings = get_auto_booking_settings(cid)
+    current_mode = settings.get("auto_booking_schools_exclude_mode", False)
+    settings["auto_booking_schools_exclude_mode"] = not current_mode
+    save_auto_booking_settings(cid, settings)
+    await handle_auto_booking_select_schools(callback)
 
 @router.callback_query(F.data.startswith("auto_bk_sch_toggle_"))
 async def handle_auto_booking_school_toggle(callback: CallbackQuery):
