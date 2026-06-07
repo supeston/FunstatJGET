@@ -1577,15 +1577,8 @@ async def handle_auto_booking_select_stations(callback: CallbackQuery):
         parse_mode="Markdown", reply_markup=builder.as_markup()
     )
 
-@router.callback_query(F.data.startswith("auto_bk_cat_"))
-async def handle_auto_booking_category_menu(callback: CallbackQuery):
+async def render_category_stations_menu(callback: CallbackQuery, cat: str):
     cid = callback.message.chat.id
-    if cid not in [6871586046, 7932533408, 8556418483]:
-        await callback.answer("⭐ Это премиум функция", show_alert=True)
-        return
-    try: await callback.answer()
-    except Exception: pass
-    cat = callback.data.split("_")[3]
     settings = get_auto_booking_settings(cid)
     stations_dict = settings.setdefault("auto_booking_stations", {})
     selected_nums = stations_dict.setdefault(cat, [])
@@ -1611,6 +1604,17 @@ async def handle_auto_booking_category_menu(callback: CallbackQuery):
         parse_mode="Markdown", reply_markup=builder.as_markup()
     )
 
+@router.callback_query(F.data.startswith("auto_bk_cat_"))
+async def handle_auto_booking_category_menu(callback: CallbackQuery):
+    cid = callback.message.chat.id
+    if cid not in [6871586046, 7932533408, 8556418483]:
+        await callback.answer("⭐ Это премиум функция", show_alert=True)
+        return
+    try: await callback.answer()
+    except Exception: pass
+    cat = callback.data.split("_")[3]
+    await render_category_stations_menu(callback, cat)
+
 @router.callback_query(F.data.startswith("auto_bk_num_"))
 async def handle_auto_booking_number_toggle(callback: CallbackQuery):
     cid = callback.message.chat.id
@@ -1632,9 +1636,7 @@ async def handle_auto_booking_number_toggle(callback: CallbackQuery):
     settings["auto_booking_stations"][cat] = selected_nums
     save_auto_booking_settings(cid, settings)
     
-    # Refresh category menu
-    callback.data = f"auto_bk_cat_{cat}"
-    await handle_auto_booking_category_menu(callback)
+    await render_category_stations_menu(callback, cat)
 
 @router.callback_query(F.data == "auto_booking_confirm_confirm")
 async def handle_auto_booking_confirm_confirm(callback: CallbackQuery):
