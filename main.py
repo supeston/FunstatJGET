@@ -1541,10 +1541,18 @@ async def handle_auto_booking_select_schools(callback: CallbackQuery):
     mode_btn_text = "🚫 Режим: Исключить выбранные" if exclude_mode else "✅ Режим: Только выбранные"
     builder.row(InlineKeyboardButton(text=mode_btn_text, callback_data="auto_bk_sch_mode_toggle"))
     
+    school_btns = []
     for idx, sch in enumerate(schools_list):
         is_sel = sch in selected_schools
-        btn_text = f"✅ {sch}" if is_sel else sch
-        builder.row(InlineKeyboardButton(text=btn_text, callback_data=f"auto_bk_sch_toggle_{idx}"))
+        if is_sel:
+            emoji = "🚫" if exclude_mode else "✅"
+            btn_text = f"{emoji} {sch}"
+        else:
+            btn_text = sch
+        school_btns.append(InlineKeyboardButton(text=btn_text, callback_data=f"auto_bk_sch_toggle_{idx}"))
+        
+    for i in range(0, len(school_btns), 2):
+        builder.row(*school_btns[i:i+2])
         
     builder.row(InlineKeyboardButton(text="↩️ Назад", callback_data="auto_booking_menu"))
     
