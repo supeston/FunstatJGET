@@ -30,7 +30,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 load_dotenv()
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-BOT_VERSION = "1.2.0.5"
+BOT_VERSION = "1.2.0.6"
 AUTH_FILE = "auth.json"
 LINKED_FILE = "linked_accounts.json"
 FILTERS_FILE = "user_filters.json"
@@ -658,7 +658,7 @@ async def cmd_start(message: Message):
         msg = await message.answer(
             "🛸 *Добро пожаловать в J-GET!*\n\n"
             "Привяжите аккаунт сайта jget-events.ru чтобы получить полный доступ "
-            "к автоматической записи, уведомлениям и управлению профилем.\n\n"
+            "к автоматической записи, учету статистики и управлению профилем.\n\n"
             "Выберите действие:",
             parse_mode="Markdown", reply_markup=get_onboarding_keyboard()
         )
@@ -693,7 +693,7 @@ async def handle_link_back_onboarding(callback: CallbackQuery):
         await callback.message.edit_text(
             "🛸 *Добро пожаловать в J-GET!*\n\n"
             "Привяжите аккаунт сайта jget-events.ru чтобы получить полный доступ "
-            "к автоматической записи, уведомлениям и управлению профилем.\n\n"
+            "к автоматической записи, учету статистики и управлению профилем.\n\n"
             "Выберите действие:",
             parse_mode="Markdown", reply_markup=get_onboarding_keyboard()
         )
@@ -710,8 +710,6 @@ async def handle_link_why(callback: CallbackQuery):
         " └ Подсчет заработанных и ожидаемых денег за месяц, статистика смен, отмен, опозданий и отработанного времени.\n\n"
         "3️⃣ *План дня и лог смен*\n"
         " └ Быстрый просмотр расписания на сегодня/завтра (время, школа, категория, станция/роль) и полная история смен.\n\n"
-        "4️⃣ *Умные уведомления*\n"
-        " └ Напоминания за 1.5 часа до начала смены, чтобы не получить опоздание.\n\n"
         "🔒 _Ваши данные хранятся локально и используются только для авторизации на официальном сайте._",
         parse_mode="Markdown", reply_markup=get_onboarding_keyboard()
     )
@@ -752,7 +750,7 @@ async def handle_link_confirm_yes(callback: CallbackQuery):
         f"✅ *Аккаунт успешно привязан!*\n\n"
         f"👤 Привет, *{name}*!\n"
         f"Теперь тебе доступны все функции бота: автоматическая запись, "
-        f"уведомления за 1.5 часа и управление профилем.\n\n"
+        f"учет статистики и управление профилем.\n\n"
         f"🛸 *Главное меню J-GET*\n\nВыбери нужный раздел:",
         parse_mode="Markdown", reply_markup=get_main_menu(cid)
     )
@@ -1131,7 +1129,7 @@ async def go_to_main_menu(callback: CallbackQuery):
         await callback.message.edit_text(
             "🛸 *Добро пожаловать в J-GET!*\n\n"
             "Привяжите аккаунт сайта jget-events.ru чтобы получить полный доступ "
-            "к автоматической записи, уведомлениям и управлению профилем.\n\n"
+            "к автоматической записи, учету статистики и управлению профилем.\n\n"
             "Выберите действие:",
             parse_mode="Markdown", reply_markup=get_onboarding_keyboard()
         )
