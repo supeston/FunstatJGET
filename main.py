@@ -754,7 +754,7 @@ async def background_weekday_autobooking_loop(bot: Bot):
                             ev_date_str = ev.get("date", "")
                             try:
                                 ev_date = datetime.strptime(ev_date_str, "%Y-%m-%d")
-                                if ev_date.date() < now.date():
+                                if ev_date.date() <= now_msk.date():
                                     continue
                             except Exception:
                                 continue
