@@ -38,8 +38,8 @@ URL_BOOK = "https://jget-events.ru/api/bookings/"
 URL_LOGIN = "https://jget-events.ru/api/login/"
 URL_PROFILE = "https://jget-events.ru/api/profile/"
 
-PAYOUT_PLAYER = 517
-PAYOUT_LEADER = 1500
+PAYOUT_PLAYER = 500
+PAYOUT_LEADER = 1000
 ADMIN_ID = 6871586046
 
 URL_CURRENT = "https://jget-events.ru/api/events/"
@@ -714,8 +714,7 @@ async def background_weekday_autobooking_loop(bot: Bot):
     while True:
         try:
             now_msk = get_msk_now()
-            # Weekdays are Monday to Friday (0 to 4)
-            if now_msk.weekday() < 5 and GLOBAL_CACHED_DATA:
+            if GLOBAL_CACHED_DATA:
                 linked = load_linked_accounts()
                 target_users = [6871586046, 7932533408, 8556418483]
                 for cid in target_users:
@@ -726,6 +725,7 @@ async def background_weekday_autobooking_loop(bot: Bot):
                     if not settings.get("auto_booking_active", False):
                         continue
                     
+                    user_name = linked[cid_str].get("name", "").strip().lower()
                     user_schools = settings.get("auto_booking_schools", [])
                     user_stations = settings.get("auto_booking_stations", {})
                     
@@ -742,6 +742,15 @@ async def background_weekday_autobooking_loop(bot: Bot):
                     now = datetime.now()
                     async with aiohttp.ClientSession(headers=headers) as session:
                         for ev in GLOBAL_CACHED_DATA:
+                            already_booked = False
+                            for p in ev.get("participants", []):
+                                p_name = f"{p.get('first_name', '')} {p.get('last_name', '')}".strip().lower()
+                                if p_name == user_name:
+                                    already_booked = True
+                                    break
+                            if already_booked:
+                                continue
+                                
                             ev_date_str = ev.get("date", "")
                             try:
                                 ev_date = datetime.strptime(ev_date_str, "%Y-%m-%d")
@@ -1030,7 +1039,7 @@ async def handle_user_profile(callback: CallbackQuery):
 
     site_extra = f"\n📊 Проведено: *{conducted}* | Отмен: *{cancelled}* | ⏰ Опозданий: *{lates}* | ⏳ Часов: *{total_hours}*"
 
-    already_earned = conducted * 517
+    already_earned = conducted * PAYOUT_PLAYER
     if stats:
         cached_leader = stats["completed_leader"]
         cached_player = stats["completed_player"]
@@ -1392,7 +1401,7 @@ async def handle_osint_view(callback: CallbackQuery):
     await callback.message.edit_text(
         dossier_text,
         parse_mode="Markdown",
-        reply_markup=get_back_btn("osint_search_start")
+        reply_markup=get_back_btn("main_menu")
     )
 
 async def run_saturday_autobooking_precheck(bot: Bot):
@@ -2129,7 +2138,7 @@ async def process_text_input(message: Message, bot: Bot):
             await edit_or_send(
                 bot=bot, chat_id=cid,
                 text=dossier_text,
-                reply_markup=get_back_btn("osint_search_start")
+                reply_markup=get_back_btn("main_menu")
             )
             return
             
