@@ -66,6 +66,7 @@ DAYS_RU = {0: "Понедельник", 1: "Вторник", 2: "Среда", 3:
 BOT_MESSAGE_ID = {}
 USER_LINK_STATE = {}
 TEMP_AUTO_BOOKINGS = {}
+OSINT_SEARCH_RESULTS = {}
 
 GLOBAL_CACHED_DATA = None
 router = Router()
@@ -359,6 +360,201 @@ def get_user_stats(site_name, events_list):
         "history": history
     }
 
+def generate_osint_dossier(target_first_name, target_last_name):
+    total_booked = 0
+    attended_count = 0
+    skipped_count = 0
+    late_count = 0
+    leader_count = 0
+    player_count = 0
+    player_lates = 0
+    total_minutes = 0
+    school_counts = {}
+    category_counts = {}
+    station_counts = {}
+    upcoming_shifts = []
+    past_shifts = []
+    
+    now_msk = get_msk_now()
+    today_date = now_msk.date()
+    target_fn_lower = target_first_name.strip().lower()
+    target_ln_lower = target_last_name.strip().lower()
+    
+    if GLOBAL_CACHED_DATA:
+        for event in GLOBAL_CACHED_DATA:
+            user_p = None
+            for p in event.get("participants", []):
+                p_fn = p.get("first_name", "").strip().lower()
+                p_ln = p.get("last_name", "").strip().lower()
+                if p_fn == target_fn_lower and p_ln == target_ln_lower:
+                    user_p = p
+                    break
+            if not user_p:
+                continue
+                
+            total_booked += 1
+            attended = user_p.get("attended", True)
+            late = user_p.get("late", False)
+            as_leader = user_p.get("as_leader")
+            
+            date_str = event.get("date", "")
+            title = event.get("title", "")
+            raw_cat = event.get("event_type_name", "")
+            school_name = format_school_name(title)
+            category = clean_category_name(raw_cat)
+            
+            st_obj = user_p.get("station")
+            st_name = st_obj.get("name") if isinstance(st_obj, dict) else ""
+            st_num = get_station_num(st_name)
+            if as_leader:
+                role_str = "Главарь"
+            elif st_num:
+                role_str = f"Станция {st_num}"
+            else:
+                role_str = "Ведущий"
+                
+            try:
+                ev_date = datetime.strptime(date_str, "%Y-%m-%d").date()
+            except Exception:
+                ev_date = None
+                
+            shift_info = {
+                "date": date_str,
+                "start_time": event.get("start_time", "00:00:00")[:5],
+                "end_time": event.get("end_time", "00:00:00")[:5],
+                "school": school_name,
+                "category": category,
+                "role": role_str,
+                "attended": attended,
+                "late": late,
+                "as_leader": as_leader
+            }
+            
+            if ev_date and ev_date >= today_date:
+                upcoming_shifts.append(shift_info)
+            else:
+                past_shifts.append(shift_info)
+                
+            if attended:
+                attended_count += 1
+                if as_leader:
+                    leader_count += 1
+                else:
+                    player_count += 1
+                    if late:
+                        player_lates += 1
+                if late:
+                    late_count += 1
+                    
+                quest_mins = 65
+                try:
+                    ts = datetime.strptime(event.get("start_time")[:8], "%H:%M:%S")
+                    te = datetime.strptime(event.get("end_time")[:8], "%H:%M:%S")
+                    diff_mins = (te - ts).total_seconds() / 60
+                    if diff_mins > 0:
+                        quest_mins = diff_mins
+                except Exception:
+                    pass
+                total_work_mins = quest_mins + 40
+                total_minutes += total_work_mins
+                
+                school_counts[school_name] = school_counts.get(school_name, 0) + 1
+                category_counts[category] = category_counts.get(category, 0) + 1
+                station_counts[role_str] = station_counts.get(role_str, 0) + 1
+            else:
+                skipped_count += 1
+                
+    attendance_rate = round((attended_count / total_booked) * 100, 1) if total_booked > 0 else 0.0
+    late_rate = round((late_count / attended_count) * 100, 1) if attended_count > 0 else 0.0
+    total_hours = round(total_minutes / 60, 1)
+    avg_shift_len = round(total_minutes / attended_count, 1) if attended_count > 0 else 0.0
+    
+    earned_leader = leader_count * PAYOUT_LEADER
+    earned_player = (player_count - player_lates) * PAYOUT_PLAYER + player_lates * 400
+    total_earned = earned_leader + earned_player
+    late_penalties = player_lates * (PAYOUT_PLAYER - 400)
+    avg_hourly_pay = round(total_earned / (total_minutes / 60), 1) if total_minutes > 0 else 0.0
+    
+    top_schools = sorted(school_counts.items(), key=lambda x: x[1], reverse=True)[:3]
+    top_schools_str = ", ".join([f"{sch} ({cnt})" for sch, cnt in top_schools]) if top_schools else "Нет сведений"
+    
+    top_cats = sorted(category_counts.items(), key=lambda x: x[1], reverse=True)[:3]
+    top_cats_str = ", ".join([f"{cat} ({cnt})" for cat, cnt in top_cats]) if top_cats else "Нет сведений"
+    
+    top_stations = sorted(station_counts.items(), key=lambda x: x[1], reverse=True)[:3]
+    top_stations_str = ", ".join([f"{role} ({cnt})" for role, cnt in top_stations]) if top_stations else "Нет сведений"
+    
+    upcoming_shifts = sorted(upcoming_shifts, key=lambda x: x["date"])
+    past_shifts = sorted(past_shifts, key=lambda x: x["date"], reverse=True)
+    
+    linked_tg_info = None
+    accounts = load_linked_accounts()
+    for uid_str, acc in accounts.items():
+        acc_name = acc.get("name", "").strip().lower()
+        target_full = f"{target_first_name} {target_last_name}".strip().lower()
+        target_rev = f"{target_last_name} {target_first_name}".strip().lower()
+        if acc_name == target_full or acc_name == target_rev:
+            linked_tg_info = {
+                "chat_id": uid_str,
+                "phone": acc.get("phone", "Н/Д")
+            }
+            break
+            
+    tg_part = ""
+    if linked_tg_info:
+        phone_raw = linked_tg_info["phone"]
+        if len(phone_raw) == 11 and phone_raw.startswith("7"):
+            pretty_phone = f"+7 ({phone_raw[1:4]}) {phone_raw[4:7]}-{phone_raw[7:9]}-{phone_raw[9:11]}"
+        else:
+            pretty_phone = phone_raw
+        tg_part = (
+            f"🔗 *СВЯЗАННЫЙ TELEGRAM-АККАУНТ:*\n"
+            f"  ├ 🆔 Telegram ID: `{linked_tg_info['chat_id']}`\n"
+            f"  └ 📞 Телефон: `{pretty_phone}`\n\n"
+        )
+    else:
+        tg_part = "⚠️ *Telegram-аккаунт не привязан к боту*\n\n"
+        
+    upcoming_lines = []
+    for s in upcoming_shifts[:5]:
+        upcoming_lines.append(f"  • {s['date']} | {s['start_time']} — {s['category']} ({s['role']}) в {s['school']}")
+    upcoming_str = "\n".join(upcoming_lines) if upcoming_lines else "  _Предстоящих смен нет_"
+    
+    past_lines = []
+    for s in past_shifts[:5]:
+        late_symbol = " ⚠️ (Опоздание)" if s["late"] else ""
+        attn_str = "" if s["attended"] else " ❌ (Неявка)"
+        past_lines.append(f"  • {s['date']} | {s['start_time']} — {s['category']} ({s['role']}){attn_str}{late_symbol}")
+    past_str = "\n".join(past_lines) if past_lines else "  _История смен пуста_"
+    
+    return (
+        f"👤 *ДОСЬЕ: {target_first_name} {target_last_name}*\n\n"
+        f"{tg_part}"
+        f"📊 *ОСНОВНАЯ СТАТИСТИКА:*\n"
+        f"  ├ Всего записей: *{total_booked}*\n"
+        f"  ├ Посещено смен: *{attended_count}* (👑 Главарь: {leader_count} | 🏃 Игрок: {player_count})\n"
+        f"  ├ Пропущено смен: *{skipped_count}*\n"
+        f"  ├ Количество опозданий: *{late_count}*\n"
+        f"  ├ Отработано времени: *{total_hours}* ч\n"
+        f"  ├ Среднее время смены: *{avg_shift_len}* мин\n"
+        f"  ├ Процент посещаемости: *{attendance_rate}%*\n"
+        f"  └ Процент опозданий: *{late_rate}%*\n\n"
+        f"💰 *ФИНАНСОВЫЙ ОТЧЕТ:*\n"
+        f"  ├ Всего начислено: *{total_earned}* ₽\n"
+        f"  ├ Из них за Главаря: *{earned_leader}* ₽\n"
+        f"  ├ Из них за Игрока: *{earned_player}* ₽\n"
+        f"  ├ Вычеты за опоздания: *{late_penalties}* ₽\n"
+        f"  └ Средняя ставка: *{avg_hourly_pay}* ₽/час\n\n"
+        f"🎯 *ПРЕДПОЧТЕНИЯ:*\n"
+        f"  ├ Любимые локации: _{top_schools_str}_\n"
+        f"  ├ Любимые квесты: _{top_cats_str}_\n"
+        f"  └ Любимые роли/позиции: _{top_stations_str}_\n\n"
+        f"⏱️ *БЛИЖАЙШИЕ СМЕНЫ:*\n"
+        f"{upcoming_str}\n\n"
+        f"📜 *ИСТОРИЯ ПОСЛЕДНИХ СМЕН (до 5):*\n"
+        f"{past_str}"
+    )
+
 
 
 def load_cookies_from_auth():
@@ -625,7 +821,8 @@ def get_main_menu(chat_id=None):
         )
     if chat_id and chat_id == ADMIN_ID:
         builder.row(
-            InlineKeyboardButton(text="👑 Админ-панель", callback_data="admin_panel")
+            InlineKeyboardButton(text="👑 Админ-панель", callback_data="admin_panel"),
+            InlineKeyboardButton(text="🔍 ОСИНТ Поиск", callback_data="osint_search_start")
         )
     if chat_id and is_linked(chat_id):
         builder.row(
@@ -1133,6 +1330,7 @@ async def handle_show_password(callback: CallbackQuery, bot: Bot):
 async def go_to_main_menu(callback: CallbackQuery):
     cid = callback.message.chat.id
     USER_LINK_STATE.pop(cid, None)
+    OSINT_SEARCH_RESULTS.pop(cid, None)
     if is_linked(cid):
         await callback.message.edit_text("🛸 *Главное меню J-GET*\n\nВыбери нужный раздел:", 
                                          parse_mode="Markdown", reply_markup=get_main_menu(cid))
@@ -1144,6 +1342,58 @@ async def go_to_main_menu(callback: CallbackQuery):
             "Выберите действие:",
             parse_mode="Markdown", reply_markup=get_onboarding_keyboard()
         )
+
+@router.callback_query(F.data == "osint_search_start")
+async def handle_osint_search_start(callback: CallbackQuery):
+    cid = callback.message.chat.id
+    if cid != ADMIN_ID:
+        await callback.answer("У вас нет прав администратора!", show_alert=True)
+        return
+    try: await callback.answer()
+    except Exception: pass
+    
+    USER_LINK_STATE[cid] = "waiting_osint_query"
+    OSINT_SEARCH_RESULTS.pop(cid, None)
+    
+    await callback.message.edit_text(
+        "🔍 *ИНТЕЛЛЕКТУАЛЬНЫЙ ОСИНТ-ПОИСК*\n\n"
+        "Отправьте имя, фамилию или часть имени/фамилии человека для поиска в базе данных смен.",
+        parse_mode="Markdown",
+        reply_markup=get_back_btn("main_menu")
+    )
+
+@router.callback_query(F.data.startswith("osint_view_"))
+async def handle_osint_view(callback: CallbackQuery):
+    cid = callback.message.chat.id
+    if cid != ADMIN_ID:
+        await callback.answer("У вас нет прав администратора!", show_alert=True)
+        return
+    try: await callback.answer()
+    except Exception: pass
+    
+    idx_str = callback.data.split("_")[2]
+    try:
+        idx = int(idx_str)
+    except Exception:
+        await callback.message.edit_text("❌ Неверный индекс.", reply_markup=get_back_btn("main_menu"))
+        return
+        
+    matches = OSINT_SEARCH_RESULTS.get(cid)
+    if not matches or idx < 0 or idx >= len(matches):
+        await callback.message.edit_text(
+            "⏳ Сессия поиска истекла. Пожалуйста, выполните поиск заново.",
+            reply_markup=get_back_btn("osint_search_start")
+        )
+        return
+        
+    fn, ln = matches[idx]
+    dossier_text = generate_osint_dossier(fn, ln)
+    
+    await callback.message.edit_text(
+        dossier_text,
+        parse_mode="Markdown",
+        reply_markup=get_back_btn("osint_search_start")
+    )
 
 async def run_saturday_autobooking_precheck(bot: Bot):
     print(f"[{datetime.now().strftime('%H:%M:%S')}] Запуск Saturday Auto-booking Precheck...")
@@ -1820,7 +2070,88 @@ async def process_text_input(message: Message, bot: Bot):
     cid = message.chat.id
 
     link_state = USER_LINK_STATE.get(cid)
-    if link_state == "waiting_credentials":
+    if link_state == "waiting_osint_query":
+        if cid != ADMIN_ID:
+            USER_LINK_STATE.pop(cid, None)
+            return
+            
+        if message.chat.type == "private":
+            try: await message.delete()
+            except Exception: pass
+            
+        query = message.text.strip()
+        query_words = [w.lower() for w in query.split()]
+        if not query_words:
+            await edit_or_send(
+                bot=bot, chat_id=cid,
+                text="❌ *Пустой запрос!*\n\nПожалуйста, отправьте имя и/или фамилию человека для поиска:",
+                reply_markup=get_back_btn("main_menu")
+            )
+            return
+            
+        unique_names = set()
+        if GLOBAL_CACHED_DATA:
+            for event in GLOBAL_CACHED_DATA:
+                for p in event.get("participants", []):
+                    fn = p.get("first_name", "").strip()
+                    ln = p.get("last_name", "").strip()
+                    if fn or ln:
+                        unique_names.add((fn, ln))
+                        
+        matches = []
+        for fn, ln in unique_names:
+            fn_ln_lower = f"{fn} {ln}".lower()
+            ln_fn_lower = f"{ln} {fn}".lower()
+            matched = True
+            for w in query_words:
+                if w not in fn_ln_lower and w not in ln_fn_lower:
+                    matched = False
+                    break
+            if matched:
+                matches.append((fn, ln))
+                
+        matches = sorted(matches, key=lambda x: (x[1], x[0]))
+        
+        if not matches:
+            await edit_or_send(
+                bot=bot, chat_id=cid,
+                text=f"❌ *Ничего не найдено*\n\n"
+                     f"Пользователь по запросу `\"{query}\"` не найден в базе данных смен.\n\n"
+                     f"Попробуйте ввести другие ключевые слова:",
+                reply_markup=get_back_btn("osint_search_start")
+            )
+            return
+            
+        if len(matches) == 1:
+            USER_LINK_STATE.pop(cid, None)
+            fn, ln = matches[0]
+            dossier_text = generate_osint_dossier(fn, ln)
+            await edit_or_send(
+                bot=bot, chat_id=cid,
+                text=dossier_text,
+                reply_markup=get_back_btn("osint_search_start")
+            )
+            return
+            
+        OSINT_SEARCH_RESULTS[cid] = matches
+        builder = InlineKeyboardBuilder()
+        for idx, (fn, ln) in enumerate(matches[:15]):
+            builder.row(InlineKeyboardButton(text=f"👤 {fn} {ln}", callback_data=f"osint_view_{idx}"))
+            
+        builder.row(InlineKeyboardButton(text="↩️ Назад", callback_data="osint_search_start"))
+        
+        limit_note = ""
+        if len(matches) > 15:
+            limit_note = f"\n\n⚠️ _Показано 15 совпадений из {len(matches)}. Пожалуйста, уточните ваш запрос._"
+            
+        await edit_or_send(
+            bot=bot, chat_id=cid,
+            text=f"🔍 *РЕЗУЛЬТАТЫ ПОИСКА ({len(matches)}):*\n\nВыберите нужного человека из списка ниже:{limit_note}",
+            reply_markup=builder.as_markup()
+        )
+        return
+
+    elif link_state == "waiting_credentials":
         if message.chat.type == "private":
             try: await message.delete()
             except Exception: pass
