@@ -2174,12 +2174,9 @@ async def handle_auto_booking_select_schools(callback: CallbackQuery):
     
     builder = InlineKeyboardBuilder()
     
-    # Mode toggle and Reset buttons at the top
+    # Mode toggle button at the top
     mode_btn_text = "🚫 Режим: Исключить выбранные" if exclude_mode else "✅ Режим: Только выбранные"
-    builder.row(
-        InlineKeyboardButton(text=mode_btn_text, callback_data="auto_bk_sch_mode_toggle"),
-        InlineKeyboardButton(text="🌍 Все школы", callback_data="auto_bk_sch_reset")
-    )
+    builder.row(InlineKeyboardButton(text=mode_btn_text, callback_data="auto_bk_sch_mode_toggle"))
     
     school_btns = []
     for idx, sch in enumerate(schools_list):
@@ -2221,18 +2218,6 @@ async def handle_auto_booking_school_mode_toggle(callback: CallbackQuery):
     save_auto_booking_settings(cid, settings)
     await handle_auto_booking_select_schools(callback)
 
-@router.callback_query(F.data == "auto_bk_sch_reset")
-async def handle_auto_booking_school_reset(callback: CallbackQuery):
-    cid = callback.message.chat.id
-    if not is_linked(cid):
-        await callback.answer("🔒 Пожалуйста, сначала привяжите аккаунт", show_alert=True)
-        return
-    try: await callback.answer()
-    except Exception: pass
-    settings = get_auto_booking_settings(cid)
-    settings["auto_booking_schools"] = []
-    save_auto_booking_settings(cid, settings)
-    await handle_auto_booking_select_schools(callback)
 
 @router.callback_query(F.data.startswith("auto_bk_sch_toggle_"))
 async def handle_auto_booking_school_toggle(callback: CallbackQuery):
