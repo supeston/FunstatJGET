@@ -517,7 +517,8 @@ def generate_osint_dossier(target_first_name, target_last_name):
         if acc_name == target_full or acc_name == target_rev:
             linked_tg_info = {
                 "chat_id": uid_str,
-                "phone": acc.get("phone", "Н/Д")
+                "phone": acc.get("phone", "Н/Д"),
+                "experience_year": acc.get("experience_year", 1)
             }
             break
             
@@ -528,9 +529,12 @@ def generate_osint_dossier(target_first_name, target_last_name):
             pretty_phone = f"+7 ({phone_raw[1:4]}) {phone_raw[4:7]}-{phone_raw[7:9]}-{phone_raw[9:11]}"
         else:
             pretty_phone = phone_raw
+        year_val = linked_tg_info["experience_year"]
+        year_str = "Второй (второгодник, 10:00)" if year_val == 2 else "Первый (первогодник, 12:00)"
         tg_part = (
             f"🔗 *СВЯЗАННЫЙ TELEGRAM-АККАУНТ:*\n"
             f"  ├ 🆔 Telegram ID: `{linked_tg_info['chat_id']}`\n"
+            f"  ├ 🎓 Год обучения: *{year_str}*\n"
             f"  └ 📞 Телефон: `{pretty_phone}`\n\n"
         )
     else:
@@ -998,6 +1002,45 @@ async def handle_link_confirm_yes(callback: CallbackQuery):
         user_info = profile_data.get("user", {})
         conducted = stats.get("conducted", user_info.get("conducted_count", 0))
         cancelled = stats.get("cancellations", user_info.get("cancellation_count", 0))
+        
+    USER_LINK_STATE[cid] = f"selecting_year:{name}:{phone}:{password}:{token}:{conducted}:{cancelled}"
+    
+    text = (
+        "🎓 *ВЫБОР ГОДА ОБУЧЕНИЯ*\n\n"
+        "На квесты вы ходите первый или второй год? От этого зависит время вашей автозаписи:\n\n"
+        "• *Первый год (первогодник):* запись проходит в *12:00* (предпроверка в 11:50).\n"
+        "• *Второй год (второгодник):* запись проходит в *10:00* (предпроверка в 09:50).\n\n"
+        "💡 _Второгодники имеют преимущество записи в 10:00 на сайте J-GET._"
+    )
+    
+    builder = InlineKeyboardBuilder()
+    builder.row(InlineKeyboardButton(text="1️⃣ Первый год (12:00)", callback_data="link_year_set_1"))
+    builder.row(InlineKeyboardButton(text="2️⃣ Второй год (10:00)", callback_data="link_year_set_2"))
+    
+    await callback.message.edit_text(
+        text,
+        parse_mode="Markdown",
+        reply_markup=builder.as_markup()
+    )
+
+@router.callback_query(F.data.startswith("link_year_set_"))
+async def handle_link_year_set(callback: CallbackQuery):
+    cid = callback.message.chat.id
+    state = USER_LINK_STATE.get(cid, "")
+    if not state.startswith("selecting_year:"):
+        await callback.answer("Сессия истекла. Начните заново.", show_alert=True)
+        return
+        
+    selected_year = int(callback.data.split("_")[3])
+    parts = state.split(":", 6)
+    
+    name = parts[1]
+    phone = parts[2]
+    password = parts[3]
+    token = parts[4]
+    conducted = int(parts[5])
+    cancelled = int(parts[6])
+    
     accounts = load_linked_accounts()
     accounts[str(cid)] = {
         "phone": phone,
@@ -1005,15 +1048,16 @@ async def handle_link_confirm_yes(callback: CallbackQuery):
         "token": token,
         "name": name,
         "conducted": conducted,
-        "cancelled": cancelled
+        "cancelled": cancelled,
+        "experience_year": selected_year
     }
     save_linked_accounts(accounts)
     USER_LINK_STATE.pop(cid, None)
+    
     await callback.message.edit_text(
         f"✅ *Аккаунт успешно привязан!*\n\n"
         f"👤 Привет, *{name}*!\n"
-        f"Теперь тебе доступны все функции бота: автоматическая запись, "
-        f"учет статистики и управление профилем.\n\n"
+        f"Вы зарегистрированы как *{'второгодник' if selected_year == 2 else 'первогодник'}* (запись в {'10:00' if selected_year == 2 else '12:00'}).\n\n"
         f"🛸 *Главное меню J-GET*\n\nВыбери нужный раздел:",
         parse_mode="Markdown", reply_markup=get_main_menu(cid)
     )
@@ -1535,20 +1579,25 @@ async def handle_osint_view(callback: CallbackQuery):
         reply_markup=get_back_btn("main_menu")
     )
 
-async def run_saturday_autobooking_precheck(bot: Bot):
-    print(f"[{datetime.now().strftime('%H:%M:%S')}] Запуск Saturday Auto-booking Precheck...")
+async def run_saturday_autobooking_precheck(bot: Bot, year_group: int):
+    print(f"[{datetime.now().strftime('%H:%M:%S')}] Запуск Saturday Auto-booking Precheck для группы {year_group}...")
     data, err = await fetch_all_data()
     if err or not data:
         print(f"[!] Precheck error: {err}")
         return
         
     linked = load_linked_accounts()
-    linked_users = [int(uid) for uid in linked.keys()]
+    group_users = []
+    for uid_str, acc in linked.items():
+        ug = acc.get("experience_year", 1)
+        if ug == year_group:
+            group_users.append(int(uid_str))
+            
     target_users = []
     priority_id = 6871586046
-    if priority_id in linked_users:
+    if priority_id in group_users:
         target_users.append(priority_id)
-    for uid in linked_users:
+    for uid in group_users:
         if uid != priority_id:
             target_users.append(uid)
             
@@ -1700,21 +1749,26 @@ async def run_saturday_autobooking_precheck(bot: Bot):
         except Exception as e:
             print(f"[!] Error sending precheck msg to {cid}: {e}")
 
-async def run_saturday_user_autobooking(bot: Bot):
-    print(f"[{datetime.now().strftime('%H:%M:%S')}] Запуск Saturday User Auto-booking Storm...")
+async def run_saturday_user_autobooking(bot: Bot, year_group: int):
+    print(f"[{datetime.now().strftime('%H:%M:%S')}] Запуск Saturday User Auto-booking Storm для группы {year_group}...")
     confirmed = load_confirmed_bookings()
     
     # Check for "auto" mode users and find matches live
     linked = load_linked_accounts()
-    linked_users = [int(uid) for uid in linked.keys()]
+    group_users = []
+    for uid_str, acc in linked.items():
+        ug = acc.get("experience_year", 1)
+        if ug == year_group:
+            group_users.append(int(uid_str))
+            
     target_users = []
     priority_id = 6871586046
-    if priority_id in linked_users:
+    if priority_id in group_users:
         target_users.append(priority_id)
-    for uid in linked_users:
+    for uid in group_users:
         if uid != priority_id:
             target_users.append(uid)
-    
+            
     auto_users = []
     for cid in target_users:
         cid_str = str(cid)
@@ -1803,12 +1857,22 @@ async def run_saturday_user_autobooking(bot: Bot):
                 if matches:
                     confirmed[cid_str] = matches
 
-    if not confirmed:
-        print("[!] Confirmed user bookings empty.")
+    # Filter confirmed bookings to only include users from this year_group
+    confirmed_group = {}
+    for c_id_str, tgts in confirmed.items():
+        try:
+            c_id = int(c_id_str)
+        except Exception:
+            continue
+        if c_id in group_users:
+            confirmed_group[c_id_str] = tgts
+
+    if not confirmed_group:
+        print(f"[!] Confirmed user bookings empty for group {year_group}.")
         return
         
     priority_id_str = "6871586046"
-    confirmed_keys = list(confirmed.keys())
+    confirmed_keys = list(confirmed_group.keys())
     ordered_keys = []
     if priority_id_str in confirmed_keys:
         ordered_keys.append(priority_id_str)
@@ -1817,7 +1881,7 @@ async def run_saturday_user_autobooking(bot: Bot):
             ordered_keys.append(k)
             
     for cid_str in ordered_keys:
-        targets = confirmed[cid_str]
+        targets = confirmed_group[cid_str]
         if not targets:
             continue
         try:
@@ -1872,8 +1936,9 @@ async def run_saturday_user_autobooking(bot: Bot):
                 )
                 
             report_lines_joined = "\n".join(report_lines)
+            time_display = "10:00" if year_group == 2 else "12:00"
             report_text = (
-                f"🤖 *ОТЧЕТ ОБ АВТОЗАПИСИ (Суббота 12:00)*\n\n"
+                f"🤖 *ОТЧЕТ ОБ АВТОЗАПИСИ (Суббота {time_display})*\n\n"
                 f"Бот завершил попытку автозаписи на подтвержденные смены:\n\n"
                 f"{report_lines_joined}\n\n"
                 f"Записано смен: *{success_count}* из *{len(targets)}*."
@@ -1883,8 +1948,11 @@ async def run_saturday_user_autobooking(bot: Bot):
             except Exception:
                 pass
                 
-    # Clear confirmed bookings
-    save_confirmed_bookings({})
+    # Clear only the bookings for this group from confirmed bookings
+    current_confirmed = load_confirmed_bookings()
+    for cid_str in confirmed_group.keys():
+        current_confirmed.pop(cid_str, None)
+    save_confirmed_bookings(current_confirmed)
 
 async def saturday_scheduler_loop(bot: Bot):
     while True:
@@ -1895,21 +1963,39 @@ async def saturday_scheduler_loop(bot: Bot):
             
             # 5 is Saturday
             if now_msk.weekday() == 5:
-                # 1. Premium Auto-booking Precheck at 11:50
-                if now_msk.hour == 11 and now_msk.minute == 50:
-                    last_pre = cfg.get("last_precheck_date", "")
+                # --- Group 2 (Second year) ---
+                # Precheck at 09:50
+                if now_msk.hour == 9 and now_msk.minute == 50:
+                    last_pre = cfg.get("last_precheck_date_g2", "")
                     if last_pre != today_str:
-                        cfg["last_precheck_date"] = today_str
+                        cfg["last_precheck_date_g2"] = today_str
                         save_scheduler_config(cfg)
-                        asyncio.create_task(run_saturday_autobooking_precheck(bot))
+                        asyncio.create_task(run_saturday_autobooking_precheck(bot, 2))
                         
-                # 2. Premium Auto-booking Storm at 12:00
-                if now_msk.hour == 12 and now_msk.minute == 0:
-                    last_user_bk = cfg.get("last_user_booking_date", "")
+                # Storm at 10:00
+                if now_msk.hour == 10 and now_msk.minute == 0:
+                    last_user_bk = cfg.get("last_user_booking_date_g2", "")
                     if last_user_bk != today_str:
-                        cfg["last_user_booking_date"] = today_str
+                        cfg["last_user_booking_date_g2"] = today_str
                         save_scheduler_config(cfg)
-                        asyncio.create_task(run_saturday_user_autobooking(bot))
+                        asyncio.create_task(run_saturday_user_autobooking(bot, 2))
+                        
+                # --- Group 1 (First year) ---
+                # Precheck at 11:50
+                if now_msk.hour == 11 and now_msk.minute == 50:
+                    last_pre = cfg.get("last_precheck_date_g1", "")
+                    if last_pre != today_str:
+                        cfg["last_precheck_date_g1"] = today_str
+                        save_scheduler_config(cfg)
+                        asyncio.create_task(run_saturday_autobooking_precheck(bot, 1))
+                        
+                # Storm at 12:00
+                if now_msk.hour == 12 and now_msk.minute == 0:
+                    last_user_bk = cfg.get("last_user_booking_date_g1", "")
+                    if last_user_bk != today_str:
+                        cfg["last_user_booking_date_g1"] = today_str
+                        save_scheduler_config(cfg)
+                        asyncio.create_task(run_saturday_user_autobooking(bot, 1))
             
         except Exception as e:
             print(f"Ошибка в планировщике: {e}")
