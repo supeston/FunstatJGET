@@ -2051,7 +2051,7 @@ async def handle_auto_booking_menu(callback: CallbackQuery):
         
     max_quests = settings.get("auto_booking_max_quests", 6)
     if max_quests == "max":
-        max_quests_str = "Максимально"
+        max_quests_str = "♾️ Максимально"
     else:
         max_quests_str = f"{max_quests} в день"
 
@@ -2428,7 +2428,7 @@ async def handle_auto_booking_select_max_quests(callback: CallbackQuery):
             row = []
             
     max_check = "✅ " if current_max == "max" else ""
-    builder.row(InlineKeyboardButton(text=f"{max_check}Максимально", callback_data="auto_booking_max_quests_set_max"))
+    builder.row(InlineKeyboardButton(text=f"{max_check}♾️ Максимально", callback_data="auto_booking_max_quests_set_max"))
     builder.row(InlineKeyboardButton(text="↩️ Назад", callback_data="auto_booking_menu"))
     
     await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=builder.as_markup())
