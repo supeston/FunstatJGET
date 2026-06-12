@@ -788,7 +788,7 @@ async def background_weekday_autobooking_loop(bot: Bot):
                             already_booked_today = get_booked_count_on_day(user_name, ev_date_str)
                             newly_booked = booked_today_tracker.get(ev_date_str, 0)
                             max_quests = settings.get("auto_booking_max_quests", 6)
-                            if already_booked_today + newly_booked >= max_quests:
+                            if max_quests != "max" and already_booked_today + newly_booked >= int(max_quests):
                                 continue
                                 
                             # Time range filter check
@@ -1629,7 +1629,7 @@ async def run_saturday_autobooking_precheck(bot: Bot, year_group: int):
             already_booked_today = get_booked_count_on_day(user_name, ev_date_str)
             matched_today = matched_per_date.get(ev_date_str, 0)
             max_quests = settings.get("auto_booking_max_quests", 6)
-            if already_booked_today + matched_today >= max_quests:
+            if max_quests != "max" and already_booked_today + matched_today >= int(max_quests):
                 continue
 
             # Time range check
@@ -1803,7 +1803,7 @@ async def run_saturday_user_autobooking(bot: Bot, year_group: int):
                     already_booked_today = get_booked_count_on_day(user_name, ev_date_str)
                     matched_today = matched_per_date.get(ev_date_str, 0)
                     max_quests = settings.get("auto_booking_max_quests", 6)
-                    if already_booked_today + matched_today >= max_quests:
+                    if max_quests != "max" and already_booked_today + matched_today >= int(max_quests):
                         continue
 
                     # Time range check
@@ -2050,7 +2050,10 @@ async def handle_auto_booking_menu(callback: CallbackQuery):
         time_str = f"С {settings.get('auto_booking_time_start', '10:00')} до {settings.get('auto_booking_time_end', '15:00')}"
         
     max_quests = settings.get("auto_booking_max_quests", 6)
-    max_quests_str = f"{max_quests} в день"
+    if max_quests == "max":
+        max_quests_str = "Максимально"
+    else:
+        max_quests_str = f"{max_quests} в день"
 
     text = (
         f"🤖 *АВТОЗАПИСЬ НА КВЕСТЫ*\n\n"
@@ -2132,9 +2135,12 @@ async def handle_auto_booking_select_schools(callback: CallbackQuery):
     
     builder = InlineKeyboardBuilder()
     
-    # Mode toggle button at the top
+    # Mode toggle and Reset buttons at the top
     mode_btn_text = "🚫 Режим: Исключить выбранные" if exclude_mode else "✅ Режим: Только выбранные"
-    builder.row(InlineKeyboardButton(text=mode_btn_text, callback_data="auto_bk_sch_mode_toggle"))
+    builder.row(
+        InlineKeyboardButton(text=mode_btn_text, callback_data="auto_bk_sch_mode_toggle"),
+        InlineKeyboardButton(text="🌍 Все школы", callback_data="auto_bk_sch_reset")
+    )
     
     school_btns = []
     for idx, sch in enumerate(schools_list):
@@ -2173,6 +2179,19 @@ async def handle_auto_booking_school_mode_toggle(callback: CallbackQuery):
     settings = get_auto_booking_settings(cid)
     current_mode = settings.get("auto_booking_schools_exclude_mode", False)
     settings["auto_booking_schools_exclude_mode"] = not current_mode
+    save_auto_booking_settings(cid, settings)
+    await handle_auto_booking_select_schools(callback)
+
+@router.callback_query(F.data == "auto_bk_sch_reset")
+async def handle_auto_booking_school_reset(callback: CallbackQuery):
+    cid = callback.message.chat.id
+    if not is_linked(cid):
+        await callback.answer("🔒 Пожалуйста, сначала привяжите аккаунт", show_alert=True)
+        return
+    try: await callback.answer()
+    except Exception: pass
+    settings = get_auto_booking_settings(cid)
+    settings["auto_booking_schools"] = []
     save_auto_booking_settings(cid, settings)
     await handle_auto_booking_select_schools(callback)
 
@@ -2387,21 +2406,29 @@ async def handle_auto_booking_select_max_quests(callback: CallbackQuery):
     settings = get_auto_booking_settings(cid)
     current_max = settings.get("auto_booking_max_quests", 6)
     
+    if current_max == "max":
+        limit_display = "Максимально (без ограничений)"
+    else:
+        limit_display = f"{current_max} квест(ов) в день"
+        
     text = (
         "🎮 *МАКСИМУМ КВЕСТОВ В ДЕНЬ*\n\n"
-        f"Текущий лимит: *{current_max}* квест(ов) в день.\n\n"
+        f"Текущий лимит: *{limit_display}*.\n\n"
         "Выберите максимальное количество смен (квестов), на которые бот может записать вас в течение одного дня:"
     )
     
     builder = InlineKeyboardBuilder()
     row = []
     for i in range(1, 7):
-        is_sel = (i == current_max)
+        is_sel = (str(i) == str(current_max))
         btn_text = f"✅ {i}" if is_sel else str(i)
         row.append(InlineKeyboardButton(text=btn_text, callback_data=f"auto_booking_max_quests_set_{i}"))
         if len(row) == 3:
             builder.row(*row)
             row = []
+            
+    max_check = "✅ " if current_max == "max" else ""
+    builder.row(InlineKeyboardButton(text=f"{max_check}Максимально", callback_data="auto_booking_max_quests_set_max"))
     builder.row(InlineKeyboardButton(text="↩️ Назад", callback_data="auto_booking_menu"))
     
     await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=builder.as_markup())
@@ -2415,9 +2442,14 @@ async def handle_auto_booking_max_quests_set(callback: CallbackQuery):
     try: await callback.answer()
     except Exception: pass
     
-    num = int(callback.data.split("_")[5])
+    val_str = callback.data.split("_")[5]
+    if val_str == "max":
+        val = "max"
+    else:
+        val = int(val_str)
+        
     settings = get_auto_booking_settings(cid)
-    settings["auto_booking_max_quests"] = num
+    settings["auto_booking_max_quests"] = val
     save_auto_booking_settings(cid, settings)
     
     await handle_auto_booking_select_max_quests(callback)
