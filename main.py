@@ -138,6 +138,14 @@ def get_auto_booking_settings(chat_id):
         user_f["auto_booking_schools_exclude_mode"] = False
     if "auto_booking_stations" not in user_f:
         user_f["auto_booking_stations"] = {}
+    if "auto_booking_time_mode" not in user_f:
+        user_f["auto_booking_time_mode"] = "any"
+    if "auto_booking_time_start" not in user_f:
+        user_f["auto_booking_time_start"] = "10:00"
+    if "auto_booking_time_end" not in user_f:
+        user_f["auto_booking_time_end"] = "15:00"
+    if "auto_booking_max_quests" not in user_f:
+        user_f["auto_booking_max_quests"] = 6
     return user_f
 
 def save_auto_booking_settings(chat_id, settings):
@@ -145,6 +153,19 @@ def save_auto_booking_settings(chat_id, settings):
     cid_str = str(chat_id)
     filters[cid_str] = settings
     save_all_filters(filters)
+
+def get_booked_count_on_day(user_name, date_str):
+    count = 0
+    if GLOBAL_CACHED_DATA:
+        user_name_lower = user_name.strip().lower()
+        for ev in GLOBAL_CACHED_DATA:
+            if ev.get("date") == date_str:
+                for p in ev.get("participants", []):
+                    p_name = f"{p.get('first_name', '')} {p.get('last_name', '')}".strip().lower()
+                    if p_name == user_name_lower:
+                        count += 1
+                        break
+    return count
 
 def is_linked(chat_id):
     accounts = load_linked_accounts()
@@ -749,7 +770,31 @@ async def background_weekday_autobooking_loop(bot: Bot):
                     
                     now = datetime.now()
                     async with aiohttp.ClientSession(headers=headers) as session:
+                        booked_today_tracker = {}
                         for ev in GLOBAL_CACHED_DATA:
+                            ev_date_str = ev.get("date", "")
+                            try:
+                                ev_date = datetime.strptime(ev_date_str, "%Y-%m-%d")
+                                if ev_date.date() <= now_msk.date():
+                                    continue
+                            except Exception:
+                                continue
+                                
+                            # Max quests limit check
+                            already_booked_today = get_booked_count_on_day(user_name, ev_date_str)
+                            newly_booked = booked_today_tracker.get(ev_date_str, 0)
+                            max_quests = settings.get("auto_booking_max_quests", 6)
+                            if already_booked_today + newly_booked >= max_quests:
+                                continue
+                                
+                            # Time range filter check
+                            time_mode = settings.get("auto_booking_time_mode", "any")
+                            if time_mode == "custom":
+                                start_limit = settings.get("auto_booking_time_start", "10:00")
+                                end_limit = settings.get("auto_booking_time_end", "15:00")
+                                if not (ev.get("start_time")[:5] >= start_limit and ev.get("end_time")[:5] <= end_limit):
+                                    continue
+                                    
                             already_booked = False
                             for p in ev.get("participants", []):
                                 p_name = f"{p.get('first_name', '')} {p.get('last_name', '')}".strip().lower()
@@ -757,14 +802,6 @@ async def background_weekday_autobooking_loop(bot: Bot):
                                     already_booked = True
                                     break
                             if already_booked:
-                                continue
-                                
-                            ev_date_str = ev.get("date", "")
-                            try:
-                                ev_date = datetime.strptime(ev_date_str, "%Y-%m-%d")
-                                if ev_date.date() <= now_msk.date():
-                                    continue
-                            except Exception:
                                 continue
                                 
                             title = ev.get("title", "")
@@ -805,6 +842,7 @@ async def background_weekday_autobooking_loop(bot: Bot):
                                 try:
                                     async with session.post(URL_BOOK, json=payload, timeout=5) as r:
                                         if r.status in [200, 201]:
+                                            booked_today_tracker[ev_date_str] = newly_booked + 1
                                             try:
                                                 dt = datetime.strptime(ev_date_str, "%Y-%m-%d")
                                                 day_w = DAYS_RU.get(dt.weekday(), "")
@@ -841,14 +879,14 @@ def get_main_menu(chat_id=None):
             InlineKeyboardButton(text="👑 Админ-панель", callback_data="admin_panel"),
             InlineKeyboardButton(text="🔍 ОСИНТ Поиск", callback_data="osint_search_start")
         )
+    row_buttons = []
     if chat_id and is_linked(chat_id):
-        builder.row(
-            InlineKeyboardButton(text="👤 Профиль", callback_data="user_profile")
-        )
+        row_buttons.append(InlineKeyboardButton(text="👤 Профиль", callback_data="user_profile"))
     else:
-        builder.row(
-            InlineKeyboardButton(text="🔗 Привязать аккаунт", callback_data="link_start")
-        )
+        row_buttons.append(InlineKeyboardButton(text="🔗 Привязать аккаунт", callback_data="link_start"))
+    
+    row_buttons.append(InlineKeyboardButton(text="📚 Гайды", callback_data="guides_menu"))
+    builder.row(*row_buttons)
     return builder.as_markup()
 
 def get_back_btn(target="main_menu"):
@@ -1360,6 +1398,91 @@ async def go_to_main_menu(callback: CallbackQuery):
             parse_mode="Markdown", reply_markup=get_onboarding_keyboard()
         )
 
+@router.callback_query(F.data == "guides_menu")
+async def handle_guides_menu(callback: CallbackQuery):
+    cid = callback.message.chat.id
+    try: await callback.answer()
+    except Exception: pass
+    
+    text = (
+        "📚 *СПРАВОЧНИК И РУКОВОДСТВА J-GET*\n\n"
+        "Выберите интересующий вас раздел инструкций ниже:"
+    )
+    builder = InlineKeyboardBuilder()
+    builder.row(InlineKeyboardButton(text="🤖 Инструкция к автозаписи", callback_data="guide_autobooking"))
+    builder.row(InlineKeyboardButton(text="👤 Управление профилем и баланс", callback_data="guide_profile"))
+    builder.row(InlineKeyboardButton(text="❓ Общие вопросы и F.A.Q.", callback_data="guide_faq"))
+    builder.row(InlineKeyboardButton(text="↩️ Главное меню", callback_data="main_menu"))
+    
+    await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=builder.as_markup())
+
+@router.callback_query(F.data == "guide_autobooking")
+async def handle_guide_autobooking(callback: CallbackQuery):
+    try: await callback.answer()
+    except Exception: pass
+    
+    text = (
+        "🤖 *РУКОВОДСТВО ПО АВТОЗАПИСИ*\n\n"
+        "Автозапись — это интеллектуальная система, которая ловит и бронирует смены (квесты) на сайте за вас.\n\n"
+        "⏱️ *Как происходит запись по субботам:*\n"
+        "1️⃣ *В 11:50 (Предпроверка):* Бот ищет смены на следующую неделю, подходящие под ваши фильтры.\n"
+        "2️⃣ *В 12:00 (Штурм):* Бот моментально отправляет запросы на бронирование.\n\n"
+        "⚙️ *Режимы работы:*\n"
+        "• *С подтверждением:* в 11:50 бот пришлет список найденных смен. Вам нужно нажать кнопку *«Подтвердить автозапись»* до 12:00, чтобы бот записал вас.\n"
+        "• *Авто-режим (без подтверждения):* бот запишет вас на все подходящие смены автоматически.\n\n"
+        "🛠️ *Настройка фильтров:*\n"
+        "• *Школы:* можно выбрать только определенные школы (белый список) или исключить ненужные (черный список).\n"
+        "• *Станции:* порядок выбора определяет приоритет. Сначала бот пытается записать на первую выбранную станцию, если она занята — на вторую и т.д.\n"
+        "• *Время:* задает рамки начала и конца квеста (например, `10:00 - 15:00`). Квесты вне этого интервала будут проигнорированы.\n"
+        "• *Кол-во квестов:* лимит смен на один календарный день (от 1 до 6)."
+    )
+    builder = InlineKeyboardBuilder()
+    builder.row(InlineKeyboardButton(text="↩️ К гайдам", callback_data="guides_menu"))
+    await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=builder.as_markup())
+
+@router.callback_query(F.data == "guide_profile")
+async def handle_guide_profile(callback: CallbackQuery):
+    try: await callback.answer()
+    except Exception: pass
+    
+    text = (
+        "👤 *ПРОФИЛЬ, БАЛАНС И СТАТИСТИКА*\n\n"
+        "Раздел *«Профиль»* позволяет в реальном времени отслеживать вашу статистику и заработок.\n\n"
+        "📊 *Статистика и аналитика:*\n"
+        "• *Проведено:* общее число завершенных смен.\n"
+        "• *Отмен:* количество отмененных смен.\n"
+        "• *Опозданий:* количество смен с отметкой об опоздании.\n"
+        "• *Часов:* суммарное время работы на смене (+40 минут на подготовку к каждой).\n\n"
+        "💰 *Финансовый учет:*\n"
+        "• Расчет ведется по ставкам: *1000 ₽* за Главаря, *500 ₽* за Игрока (или *400 ₽* при опоздании).\n"
+        "• *Уже заработано:* сумма за прошедшие смены в этом месяце.\n"
+        "• *В ожидании:* сумма за будущие смены, на которые вы уже записаны.\n"
+        "• *Всего за месяц:* общая сумма (заработанное + ожидаемое).\n\n"
+        "🗺️ *План на сегодня/завтра:*\n"
+        "• Отображает список ваших смен, точное время, школы и роли на выбранный день с удобной кнопкой навигации на Яндекс Карты."
+    )
+    builder = InlineKeyboardBuilder()
+    builder.row(InlineKeyboardButton(text="↩️ К гайдам", callback_data="guides_menu"))
+    await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=builder.as_markup())
+
+@router.callback_query(F.data == "guide_faq")
+async def handle_guide_faq(callback: CallbackQuery):
+    try: await callback.answer()
+    except Exception: pass
+    
+    text = (
+        "❓ *F.A.Q. — ЧАСТО ЗАДАВАЕМЫЕ ВОПРОСЫ*\n\n"
+        "❓ *Безопасно ли передавать пароль боту?*\n"
+        "➡️ Да, ваши данные хранятся локально в зашифрованном/защищенном виде на сервере бота и передаются исключительно на официальный сайт jget-events.ru для авторизации.\n\n"
+        "❓ *Бот перехватывает смены в будни?*\n"
+        "➡️ Да! Бот в фоновом режиме каждые 30 секунд проверяет новые смены. Если появляется свободное место в будний день, подходящее под ваши фильтры, бот мгновенно бронирует его и присылает уведомление.\n\n"
+        "❓ *Как изменить или сбросить фильтры?*\n"
+        "➡️ Перейдите в меню *«Автозапись»* и настройте фильтры заново. Чтобы ловить квесты в любых школах и на любых станциях, просто снимите галочки со всех элементов."
+    )
+    builder = InlineKeyboardBuilder()
+    builder.row(InlineKeyboardButton(text="↩️ К гайдам", callback_data="guides_menu"))
+    await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=builder.as_markup())
+
 @router.callback_query(F.data == "osint_search_start")
 async def handle_osint_search_start(callback: CallbackQuery):
     cid = callback.message.chat.id
@@ -1437,10 +1560,12 @@ async def run_saturday_autobooking_precheck(bot: Bot):
         if not settings.get("auto_booking_active", False):
             continue
             
+        user_name = linked.get(cid_str, {}).get("name", "").strip().lower()
         user_schools = settings.get("auto_booking_schools", [])
         user_stations = settings.get("auto_booking_stations", {})
         
         matches = []
+        matched_per_date = {}
         now = datetime.now()
         for ev in data:
             ev_date_str = ev.get("date", "")
@@ -1450,6 +1575,21 @@ async def run_saturday_autobooking_precheck(bot: Bot):
                     continue
             except Exception:
                 continue
+                
+            # Max quests check
+            already_booked_today = get_booked_count_on_day(user_name, ev_date_str)
+            matched_today = matched_per_date.get(ev_date_str, 0)
+            max_quests = settings.get("auto_booking_max_quests", 6)
+            if already_booked_today + matched_today >= max_quests:
+                continue
+
+            # Time range check
+            time_mode = settings.get("auto_booking_time_mode", "any")
+            if time_mode == "custom":
+                start_limit = settings.get("auto_booking_time_start", "10:00")
+                end_limit = settings.get("auto_booking_time_end", "15:00")
+                if not (ev.get("start_time")[:5] >= start_limit and ev.get("end_time")[:5] <= end_limit):
+                    continue
                 
             title = ev.get("title", "")
             school_name = format_school_name(title)
@@ -1493,6 +1633,7 @@ async def run_saturday_autobooking_precheck(bot: Bot):
                     "category": clean_cat,
                     "station_num": matched_num
                 })
+                matched_per_date[ev_date_str] = matched_today + 1
                         
         if not matches:
             try:
@@ -1589,10 +1730,12 @@ async def run_saturday_user_autobooking(bot: Bot):
             now = datetime.now()
             for cid in auto_users:
                 cid_str = str(cid)
+                user_name = linked.get(cid_str, {}).get("name", "").strip().lower()
                 settings = get_auto_booking_settings(cid)
                 user_schools = settings.get("auto_booking_schools", [])
                 user_stations = settings.get("auto_booking_stations", {})
                 matches = []
+                matched_per_date = {}
                 for ev in data:
                     ev_date_str = ev.get("date", "")
                     try:
@@ -1601,6 +1744,22 @@ async def run_saturday_user_autobooking(bot: Bot):
                             continue
                     except Exception:
                         continue
+
+                    # Max quests check
+                    already_booked_today = get_booked_count_on_day(user_name, ev_date_str)
+                    matched_today = matched_per_date.get(ev_date_str, 0)
+                    max_quests = settings.get("auto_booking_max_quests", 6)
+                    if already_booked_today + matched_today >= max_quests:
+                        continue
+
+                    # Time range check
+                    time_mode = settings.get("auto_booking_time_mode", "any")
+                    if time_mode == "custom":
+                        start_limit = settings.get("auto_booking_time_start", "10:00")
+                        end_limit = settings.get("auto_booking_time_end", "15:00")
+                        if not (ev.get("start_time")[:5] >= start_limit and ev.get("end_time")[:5] <= end_limit):
+                            continue
+
                     title = ev.get("title", "")
                     school_name = format_school_name(title)
                     if user_schools:
@@ -1640,6 +1799,7 @@ async def run_saturday_user_autobooking(bot: Bot):
                             "category": clean_cat,
                             "station_num": matched_num
                         })
+                        matched_per_date[ev_date_str] = matched_today + 1
                 if matches:
                     confirmed[cid_str] = matches
 
@@ -1797,13 +1957,24 @@ async def handle_auto_booking_menu(callback: CallbackQuery):
         if nums:
             stations_parts.append(f"{cat}: {', '.join(map(str, sorted(nums)))}")
     stations_str = "; ".join(stations_parts) if stations_parts else "Не выбраны"
+    time_mode = settings.get("auto_booking_time_mode", "any")
+    if time_mode == "any":
+        time_str = "Любое время"
+    else:
+        time_str = f"С {settings.get('auto_booking_time_start', '10:00')} до {settings.get('auto_booking_time_end', '15:00')}"
+        
+    max_quests = settings.get("auto_booking_max_quests", 6)
+    max_quests_str = f"{max_quests} в день"
+
     text = (
         f"🤖 *АВТОЗАПИСЬ НА КВЕСТЫ*\n\n"
         f"{desc_text}\n\n"
         f"ℹ️ *Статус автозаписи:* {status_str}\n"
         f"⚙️ *Режим записи:* {mode_display}\n"
-        f"🏫 *Целевые школы:* _{schools_str}_\n"
-        f"🎯 *Фаворит-станции:* _{stations_str}_\n\n"
+        f"🏫 *Школы:* _{schools_str}_\n"
+        f"🎯 *Станции:* _{stations_str}_\n"
+        f"⏱️ *Время:* _{time_str}_\n"
+        f"🎮 *Кол-во квестов:* _{max_quests_str}_\n\n"
         f"📌 *Приоритет станций:* Бот записывает сначала на те станции, которые вы выбрали первыми. "
         f"Если первая станция будет занята, бот автоматически попробует записать на вторую по приоритету и так далее."
     )
@@ -1815,8 +1986,12 @@ async def handle_auto_booking_menu(callback: CallbackQuery):
     builder.row(InlineKeyboardButton(text=mode_btn_text, callback_data="auto_booking_mode_toggle"))
     
     builder.row(
-        InlineKeyboardButton(text="🏫 Выбрать школы", callback_data="auto_booking_select_schools"),
-        InlineKeyboardButton(text="🎯 Выбрать станции", callback_data="auto_booking_select_stations")
+        InlineKeyboardButton(text="🏫 Школы", callback_data="auto_booking_select_schools"),
+        InlineKeyboardButton(text="🎯 Станции", callback_data="auto_booking_select_stations")
+    )
+    builder.row(
+        InlineKeyboardButton(text="⏱️ Время", callback_data="auto_booking_select_time"),
+        InlineKeyboardButton(text="🎮 Кол-во квестов", callback_data="auto_booking_select_max_quests")
     )
     builder.row(InlineKeyboardButton(text="↩️ Главное меню", callback_data="main_menu"))
     await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=builder.as_markup())
@@ -2043,6 +2218,124 @@ async def handle_auto_booking_number_toggle(callback: CallbackQuery):
     
     await render_category_stations_menu(callback, cat)
 
+@router.callback_query(F.data == "auto_booking_select_time")
+async def handle_auto_booking_select_time(callback: CallbackQuery):
+    cid = callback.message.chat.id
+    if not is_linked(cid):
+        await callback.answer("🔒 Пожалуйста, сначала привяжите аккаунт", show_alert=True)
+        return
+    try: await callback.answer()
+    except Exception: pass
+    
+    settings = get_auto_booking_settings(cid)
+    time_mode = settings.get("auto_booking_time_mode", "any")
+    start_time = settings.get("auto_booking_time_start", "10:00")
+    end_time = settings.get("auto_booking_time_end", "15:00")
+    
+    if time_mode == "any":
+        status_text = "🟢 *Любое время* (бот будет записывать вас на смены с любым временем начала и конца)."
+    else:
+        status_text = f"⏱️ *Ограничение по времени:* с `{start_time}` до `{end_time}` (бот будет ловить только те смены, которые полностью входят в этот интервал)."
+        
+    text = (
+        "⏱️ *НАСТРОЙКА ВРЕМЕНИ АВТОЗАПИСИ*\n\n"
+        f"Текущая настройка:\n{status_text}\n\n"
+        "Выберите подходящий режим работы:"
+    )
+    
+    builder = InlineKeyboardBuilder()
+    any_check = "✅ " if time_mode == "any" else ""
+    cust_check = "✅ " if time_mode == "custom" else ""
+    builder.row(InlineKeyboardButton(text=f"{any_check}Любое время", callback_data="auto_booking_time_mode_any"))
+    builder.row(InlineKeyboardButton(text=f"{cust_check}Указать свой интервал", callback_data="auto_booking_time_mode_custom"))
+    builder.row(InlineKeyboardButton(text="↩️ Назад", callback_data="auto_booking_menu"))
+    
+    await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=builder.as_markup())
+
+@router.callback_query(F.data == "auto_booking_time_mode_any")
+async def handle_auto_booking_time_any(callback: CallbackQuery):
+    cid = callback.message.chat.id
+    if not is_linked(cid):
+        await callback.answer("🔒 Пожалуйста, сначала привяжите аккаунт", show_alert=True)
+        return
+    try: await callback.answer()
+    except Exception: pass
+    
+    settings = get_auto_booking_settings(cid)
+    settings["auto_booking_time_mode"] = "any"
+    save_auto_booking_settings(cid, settings)
+    await handle_auto_booking_select_time(callback)
+
+@router.callback_query(F.data == "auto_booking_time_mode_custom")
+async def handle_auto_booking_time_custom(callback: CallbackQuery):
+    cid = callback.message.chat.id
+    if not is_linked(cid):
+        await callback.answer("🔒 Пожалуйста, сначала привяжите аккаунт", show_alert=True)
+        return
+    try: await callback.answer()
+    except Exception: pass
+    
+    USER_LINK_STATE[cid] = "waiting_time_range"
+    
+    text = (
+        "⏱️ *УКАЖИТЕ ИНТЕРВАЛ ВРЕМЕНИ*\n\n"
+        "Введите желаемый промежуток времени в формате `ЧЧ:ММ - ЧЧ:ММ` (например, `10:00 - 15:00` или `09:30 - 18:00`):\n\n"
+        "Бот будет записывать вас только на те смены, которые полностью укладываются в эти рамки.\n\n"
+        "📌 _Время должно быть указано в 24-часовом формате, начало должно быть строго раньше конца._"
+    )
+    
+    builder = InlineKeyboardBuilder()
+    builder.row(InlineKeyboardButton(text="↩️ Отмена", callback_data="auto_booking_select_time"))
+    
+    await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=builder.as_markup())
+
+@router.callback_query(F.data == "auto_booking_select_max_quests")
+async def handle_auto_booking_select_max_quests(callback: CallbackQuery):
+    cid = callback.message.chat.id
+    if not is_linked(cid):
+        await callback.answer("🔒 Пожалуйста, сначала привяжите аккаунт", show_alert=True)
+        return
+    try: await callback.answer()
+    except Exception: pass
+    
+    settings = get_auto_booking_settings(cid)
+    current_max = settings.get("auto_booking_max_quests", 6)
+    
+    text = (
+        "🎮 *МАКСИМУМ КВЕСТОВ В ДЕНЬ*\n\n"
+        f"Текущий лимит: *{current_max}* квест(ов) в день.\n\n"
+        "Выберите максимальное количество смен (квестов), на которые бот может записать вас в течение одного дня:"
+    )
+    
+    builder = InlineKeyboardBuilder()
+    row = []
+    for i in range(1, 7):
+        is_sel = (i == current_max)
+        btn_text = f"✅ {i}" if is_sel else str(i)
+        row.append(InlineKeyboardButton(text=btn_text, callback_data=f"auto_booking_max_quests_set_{i}"))
+        if len(row) == 3:
+            builder.row(*row)
+            row = []
+    builder.row(InlineKeyboardButton(text="↩️ Назад", callback_data="auto_booking_menu"))
+    
+    await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=builder.as_markup())
+
+@router.callback_query(F.data.startswith("auto_booking_max_quests_set_"))
+async def handle_auto_booking_max_quests_set(callback: CallbackQuery):
+    cid = callback.message.chat.id
+    if not is_linked(cid):
+        await callback.answer("🔒 Пожалуйста, сначала привяжите аккаунт", show_alert=True)
+        return
+    try: await callback.answer()
+    except Exception: pass
+    
+    num = int(callback.data.split("_")[5])
+    settings = get_auto_booking_settings(cid)
+    settings["auto_booking_max_quests"] = num
+    save_auto_booking_settings(cid, settings)
+    
+    await handle_auto_booking_select_max_quests(callback)
+
 @router.callback_query(F.data == "auto_booking_confirm_confirm")
 async def handle_auto_booking_confirm_confirm(callback: CallbackQuery):
     cid = callback.message.chat.id
@@ -2111,7 +2404,66 @@ async def process_text_input(message: Message, bot: Bot):
     cid = message.chat.id
 
     link_state = USER_LINK_STATE.get(cid)
-    if link_state == "waiting_osint_query":
+    if link_state == "waiting_time_range":
+        if message.chat.type == "private":
+            try: await message.delete()
+            except Exception: pass
+            
+        time_text = message.text.strip()
+        match = re.match(r"^(\d{1,2}:\d{2})\s*-\s*(\d{1,2}:\d{2})$", time_text)
+        if not match:
+            await edit_or_send(
+                bot=bot, chat_id=cid,
+                text="❌ *Неверный формат времени!*\n\nПожалуйста, отправьте диапазон в формате `ЧЧ:ММ - ЧЧ:ММ` (например, `10:00 - 15:00`):\n\nПопробуйте еще раз:",
+                reply_markup=get_back_btn("auto_booking_select_time")
+            )
+            return
+            
+        start_t_str, end_t_str = match.groups()
+        
+        def validate_and_format_time(t_str):
+            parts = t_str.split(":")
+            h, m = int(parts[0]), int(parts[1])
+            if 0 <= h <= 23 and 0 <= m <= 59:
+                return f"{h:02d}:{m:02d}"
+            return None
+
+        fmt_start = validate_and_format_time(start_t_str)
+        fmt_end = validate_and_format_time(end_t_str)
+        
+        if not fmt_start or not fmt_end or fmt_start >= fmt_end:
+            await edit_or_send(
+                bot=bot, chat_id=cid,
+                text="❌ *Некорректный диапазон времени!*\n\nУбедитесь, что:\n"
+                     "1. Часы в диапазоне 0-23, а минуты 0-59\n"
+                     "2. Время начала строго раньше времени конца\n\n"
+                     "Попробуйте еще раз:",
+                reply_markup=get_back_btn("auto_booking_select_time")
+            )
+            return
+            
+        USER_LINK_STATE.pop(cid, None)
+        settings = get_auto_booking_settings(cid)
+        settings["auto_booking_time_mode"] = "custom"
+        settings["auto_booking_time_start"] = fmt_start
+        settings["auto_booking_time_end"] = fmt_end
+        save_auto_booking_settings(cid, settings)
+        
+        text = (
+            f"✅ *Диапазон времени сохранен:* с `{fmt_start}` до `{fmt_end}`.\n\n"
+            "Бот будет бронировать для вас только смены, проходящие в рамках этого времени."
+        )
+        builder = InlineKeyboardBuilder()
+        builder.row(InlineKeyboardButton(text="↩️ Назад", callback_data="auto_booking_select_time"))
+        
+        await edit_or_send(
+            bot=bot, chat_id=cid,
+            text=text,
+            reply_markup=builder.as_markup()
+        )
+        return
+
+    elif link_state == "waiting_osint_query":
         if cid != ADMIN_ID:
             USER_LINK_STATE.pop(cid, None)
             return
