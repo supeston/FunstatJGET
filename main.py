@@ -1167,16 +1167,24 @@ async def handle_user_profile(callback: CallbackQuery):
 
     total_for_month = already_earned + expected_earnings
 
+    exp_year = acc.get("experience_year", 1)
+    year_str = "Первый год (первогодник, 12:00)" if exp_year == 1 else "Второй год (второгодник, 10:00)"
+
     text = (
         f"👤 *ПРОФИЛЬ*\n\n"
         f"📛 Имя на сайте: *{site_name}*\n"
         f"💬 Telegram: *{tg_name}* ({tg_username})\n"
         f"🆔 Telegram ID: `{tg_id}`\n"
-        f"📞 Телефон: `{phone_fmt}`"
+        f"📞 Телефон: `{phone_fmt}`\n"
+        f"🎓 Год обучения: *{year_str}*"
         f"{site_extra}\n\n"
         f"💰 Уже заработано: *{already_earned}* ₽\n"
         f"⏳ В ожидании: *{expected_earnings}* ₽\n"
-        f"🔥 Всего за месяц: *{total_for_month}* ₽"
+        f"🔥 Всего за месяц: *{total_for_month}* ₽\n\n"
+        f"⚠️ *ВАЖНО:* Вы должны строго выбрать свой *реальный* статус! "
+        f"Если вы выберете второй год будучи первогодником, бот попытается записать вас в 10:00 и получит ошибку сайта. "
+        f"Если вы выберете первый год будучи второгодником, бот начнет запись только в 12:00, "
+        f"когда другие второгодники уже займут все лучшие места."
     )
     now = datetime.now()
     today_str = now.strftime("%Y-%m-%d")
@@ -1235,6 +1243,10 @@ async def handle_user_profile(callback: CallbackQuery):
     builder = InlineKeyboardBuilder()
     if plan_button:
         builder.row(plan_button)
+        
+    toggle_year_text = "🎓 Сменить на: Второй год (10:00)" if exp_year == 1 else "🎓 Сменить на: Первый год (12:00)"
+    builder.row(InlineKeyboardButton(text=toggle_year_text, callback_data="profile_toggle_year"))
+    
     builder.row(
         InlineKeyboardButton(text="📜 Лог смен", callback_data="shift_log"),
         InlineKeyboardButton(text="🔑 Мой пароль", callback_data="show_password")
@@ -1243,6 +1255,33 @@ async def handle_user_profile(callback: CallbackQuery):
         InlineKeyboardButton(text="↩️ Главное меню", callback_data="main_menu")
     )
     await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=builder.as_markup())
+
+@router.callback_query(F.data == "profile_toggle_year")
+async def handle_profile_toggle_year(callback: CallbackQuery):
+    cid = callback.message.chat.id
+    if not is_linked(cid):
+        await callback.answer("🔒 Пожалуйста, сначала привяжите аккаунт", show_alert=True)
+        return
+        
+    accounts = load_linked_accounts()
+    acc = accounts.get(str(cid))
+    if not acc:
+        await callback.answer("Аккаунт не найден!", show_alert=True)
+        return
+        
+    current_year = acc.get("experience_year", 1)
+    new_year = 2 if current_year == 1 else 1
+    acc["experience_year"] = new_year
+    accounts[str(cid)] = acc
+    save_linked_accounts(accounts)
+    
+    new_status = "второгодник (10:00)" if new_year == 2 else "первогодник (12:00)"
+    try:
+        await callback.answer(f"Статус успешно изменен на {new_status}!", show_alert=False)
+    except Exception:
+        pass
+        
+    await handle_user_profile(callback)
 
 @router.callback_query(F.data == "today_plan")
 async def handle_today_plan(callback: CallbackQuery):
