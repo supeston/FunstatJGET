@@ -716,7 +716,15 @@ async def background_weekday_autobooking_loop(bot: Bot):
             now_msk = get_msk_now()
             if GLOBAL_CACHED_DATA:
                 linked = load_linked_accounts()
-                target_users = [6871586046, 7932533408, 8556418483]
+                linked_users = [int(uid) for uid in linked.keys()]
+                target_users = []
+                priority_id = 6871586046
+                if priority_id in linked_users:
+                    target_users.append(priority_id)
+                for uid in linked_users:
+                    if uid != priority_id:
+                        target_users.append(uid)
+
                 for cid in target_users:
                     cid_str = str(cid)
                     if cid_str not in linked:
@@ -824,7 +832,7 @@ async def background_weekday_autobooking_loop(bot: Bot):
 
 def get_main_menu(chat_id=None):
     builder = InlineKeyboardBuilder()
-    if chat_id and chat_id in [6871586046, 7932533408, 8556418483]:
+    if chat_id and is_linked(chat_id):
         builder.row(
             InlineKeyboardButton(text="🤖 Автозапись", callback_data="auto_booking_menu")
         )
@@ -1412,8 +1420,15 @@ async def run_saturday_autobooking_precheck(bot: Bot):
         return
         
     linked = load_linked_accounts()
-    target_users = [6871586046, 7932533408, 8556418483]
-    
+    linked_users = [int(uid) for uid in linked.keys()]
+    target_users = []
+    priority_id = 6871586046
+    if priority_id in linked_users:
+        target_users.append(priority_id)
+    for uid in linked_users:
+        if uid != priority_id:
+            target_users.append(uid)
+            
     for cid in target_users:
         cid_str = str(cid)
         if cid_str not in linked:
@@ -1550,7 +1565,14 @@ async def run_saturday_user_autobooking(bot: Bot):
     
     # Check for "auto" mode users and find matches live
     linked = load_linked_accounts()
-    target_users = [6871586046, 7932533408, 8556418483]
+    linked_users = [int(uid) for uid in linked.keys()]
+    target_users = []
+    priority_id = 6871586046
+    if priority_id in linked_users:
+        target_users.append(priority_id)
+    for uid in linked_users:
+        if uid != priority_id:
+            target_users.append(uid)
     
     auto_users = []
     for cid in target_users:
@@ -1625,7 +1647,17 @@ async def run_saturday_user_autobooking(bot: Bot):
         print("[!] Confirmed user bookings empty.")
         return
         
-    for cid_str, targets in confirmed.items():
+    priority_id_str = "6871586046"
+    confirmed_keys = list(confirmed.keys())
+    ordered_keys = []
+    if priority_id_str in confirmed_keys:
+        ordered_keys.append(priority_id_str)
+    for k in confirmed_keys:
+        if k != priority_id_str:
+            ordered_keys.append(k)
+            
+    for cid_str in ordered_keys:
+        targets = confirmed[cid_str]
         if not targets:
             continue
         try:
@@ -1735,8 +1767,8 @@ def load_account_auth_by_chat_id(chat_id):
 @router.callback_query(F.data == "auto_booking_menu")
 async def handle_auto_booking_menu(callback: CallbackQuery):
     cid = callback.message.chat.id
-    if cid not in [6871586046, 7932533408, 8556418483]:
-        await callback.answer("⭐ Это премиум функция", show_alert=True)
+    if not is_linked(cid):
+        await callback.answer("🔒 Пожалуйста, сначала привяжите аккаунт", show_alert=True)
         return
     try: await callback.answer()
     except Exception: pass
@@ -1792,8 +1824,8 @@ async def handle_auto_booking_menu(callback: CallbackQuery):
 @router.callback_query(F.data == "auto_booking_mode_toggle")
 async def handle_auto_booking_mode_toggle(callback: CallbackQuery):
     cid = callback.message.chat.id
-    if cid not in [6871586046, 7932533408, 8556418483]:
-        await callback.answer("⭐ Это премиум функция", show_alert=True)
+    if not is_linked(cid):
+        await callback.answer("🔒 Пожалуйста, сначала привяжите аккаунт", show_alert=True)
         return
     try: await callback.answer()
     except Exception: pass
@@ -1806,8 +1838,8 @@ async def handle_auto_booking_mode_toggle(callback: CallbackQuery):
 @router.callback_query(F.data == "auto_booking_toggle")
 async def handle_auto_booking_toggle(callback: CallbackQuery):
     cid = callback.message.chat.id
-    if cid not in [6871586046, 7932533408, 8556418483]:
-        await callback.answer("⭐ Это премиум функция", show_alert=True)
+    if not is_linked(cid):
+        await callback.answer("🔒 Пожалуйста, сначала привяжите аккаунт", show_alert=True)
         return
     try: await callback.answer()
     except Exception: pass
@@ -1819,8 +1851,8 @@ async def handle_auto_booking_toggle(callback: CallbackQuery):
 @router.callback_query(F.data == "auto_booking_select_schools")
 async def handle_auto_booking_select_schools(callback: CallbackQuery):
     cid = callback.message.chat.id
-    if cid not in [6871586046, 7932533408, 8556418483]:
-        await callback.answer("⭐ Это премиум функция", show_alert=True)
+    if not is_linked(cid):
+        await callback.answer("🔒 Пожалуйста, сначала привяжите аккаунт", show_alert=True)
         return
     try: await callback.answer()
     except Exception: pass
@@ -1872,8 +1904,8 @@ async def handle_auto_booking_select_schools(callback: CallbackQuery):
 @router.callback_query(F.data == "auto_bk_sch_mode_toggle")
 async def handle_auto_booking_school_mode_toggle(callback: CallbackQuery):
     cid = callback.message.chat.id
-    if cid not in [6871586046, 7932533408, 8556418483]:
-        await callback.answer("⭐ Это премиум функция", show_alert=True)
+    if not is_linked(cid):
+        await callback.answer("🔒 Пожалуйста, сначала привяжите аккаунт", show_alert=True)
         return
     try: await callback.answer()
     except Exception: pass
@@ -1886,8 +1918,8 @@ async def handle_auto_booking_school_mode_toggle(callback: CallbackQuery):
 @router.callback_query(F.data.startswith("auto_bk_sch_toggle_"))
 async def handle_auto_booking_school_toggle(callback: CallbackQuery):
     cid = callback.message.chat.id
-    if cid not in [6871586046, 7932533408, 8556418483]:
-        await callback.answer("⭐ Это премиум функция", show_alert=True)
+    if not is_linked(cid):
+        await callback.answer("🔒 Пожалуйста, сначала привяжите аккаунт", show_alert=True)
         return
     try: await callback.answer()
     except Exception: pass
@@ -1921,8 +1953,8 @@ async def handle_auto_booking_school_toggle(callback: CallbackQuery):
 @router.callback_query(F.data == "auto_booking_select_stations")
 async def handle_auto_booking_select_stations(callback: CallbackQuery):
     cid = callback.message.chat.id
-    if cid not in [6871586046, 7932533408, 8556418483]:
-        await callback.answer("⭐ Это премиум функция", show_alert=True)
+    if not is_linked(cid):
+        await callback.answer("🔒 Пожалуйста, сначала привяжите аккаунт", show_alert=True)
         return
     try: await callback.answer()
     except Exception: pass
@@ -1980,8 +2012,8 @@ async def render_category_stations_menu(callback: CallbackQuery, cat: str):
 @router.callback_query(F.data.startswith("auto_bk_cat_"))
 async def handle_auto_booking_category_menu(callback: CallbackQuery):
     cid = callback.message.chat.id
-    if cid not in [6871586046, 7932533408, 8556418483]:
-        await callback.answer("⭐ Это премиум функция", show_alert=True)
+    if not is_linked(cid):
+        await callback.answer("🔒 Пожалуйста, сначала привяжите аккаунт", show_alert=True)
         return
     try: await callback.answer()
     except Exception: pass
@@ -1991,8 +2023,8 @@ async def handle_auto_booking_category_menu(callback: CallbackQuery):
 @router.callback_query(F.data.startswith("auto_bk_num_"))
 async def handle_auto_booking_number_toggle(callback: CallbackQuery):
     cid = callback.message.chat.id
-    if cid not in [6871586046, 7932533408, 8556418483]:
-        await callback.answer("⭐ Это премиум функция", show_alert=True)
+    if not is_linked(cid):
+        await callback.answer("🔒 Пожалуйста, сначала привяжите аккаунт", show_alert=True)
         return
     try: await callback.answer()
     except Exception: pass
@@ -2014,8 +2046,8 @@ async def handle_auto_booking_number_toggle(callback: CallbackQuery):
 @router.callback_query(F.data == "auto_booking_confirm_confirm")
 async def handle_auto_booking_confirm_confirm(callback: CallbackQuery):
     cid = callback.message.chat.id
-    if cid not in [6871586046, 7932533408, 8556418483]:
-        await callback.answer("⭐ Это премиум функция", show_alert=True)
+    if not is_linked(cid):
+        await callback.answer("🔒 Пожалуйста, сначала привяжите аккаунт", show_alert=True)
         return
     try: await callback.answer()
     except Exception: pass
