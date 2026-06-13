@@ -301,6 +301,12 @@ def normalize_category(event_type_name, title=""):
     return event_type_name
 
 
+def time_diff_minutes(t1_str, t2_str):
+    h1, m1 = map(int, t1_str.split(":"))
+    h2, m2 = map(int, t2_str.split(":"))
+    return (h2 * 60 + m2) - (h1 * 60 + m1)
+
+
 def is_shift_valid_for_user(ev, user_name, settings, current_cached_data, temp_booked_shifts_on_date):
     ev_date_str = ev.get("date", "")
     school_name = format_school_name(ev.get("title", ""))
@@ -326,14 +332,20 @@ def is_shift_valid_for_user(ev, user_name, settings, current_cached_data, temp_b
     booked_shifts.extend(temp_booked_shifts_on_date)
                 
     if booked_shifts:
-        for booked in booked_shifts:
-            if booked["school"] != school_name:
-                return False
         ev_start = ev.get("start_time")[:5]
         ev_end = ev.get("end_time")[:5]
         for booked in booked_shifts:
+            # Overlap check
             if max(ev_start, booked["start_time"]) < min(ev_end, booked["end_time"]):
                 return False
+            # School travel gap check
+            if booked["school"] != school_name:
+                if ev_start >= booked["end_time"]:
+                    gap = time_diff_minutes(booked["end_time"], ev_start)
+                else:
+                    gap = time_diff_minutes(ev_end, booked["start_time"])
+                if gap < 60:
+                    return False
                 
     max_quests = settings.get("auto_booking_max_quests", 6)
     if max_quests != "max":
@@ -466,12 +478,28 @@ def get_smart_matches(data, user_name, settings):
                     if max(c['start_time'], active['start_time']) < min(c['end_time'], active['end_time']):
                         overlap = True
                         break
+                    if c['school'] != active['school']:
+                        if c['start_time'] >= active['end_time']:
+                            gap = time_diff_minutes(active['end_time'], c['start_time'])
+                        else:
+                            gap = time_diff_minutes(c['end_time'], active['start_time'])
+                        if gap < 60:
+                            overlap = True
+                            break
                 if overlap:
                     continue
                 for booked in booked_shifts:
                     if max(c['start_time'], booked['start_time']) < min(c['end_time'], booked['end_time']):
                         overlap = True
                         break
+                    if c['school'] != booked['school']:
+                        if c['start_time'] >= booked['end_time']:
+                            gap = time_diff_minutes(booked['end_time'], c['start_time'])
+                        else:
+                            gap = time_diff_minutes(c['end_time'], booked['start_time'])
+                        if gap < 60:
+                            overlap = True
+                            break
                 if overlap:
                     continue
                     
@@ -489,10 +517,6 @@ def get_smart_matches(data, user_name, settings):
         candidates = candidates_by_date.get(date_str, [])
         booked = booked_by_date.get(date_str, [])
         
-        booked_school = None
-        if booked:
-            booked_school = booked[0]["school"]
-            
         max_limit = 999999
         if max_quests != "max":
             max_limit = int(max_quests)
@@ -501,23 +525,9 @@ def get_smart_matches(data, user_name, settings):
         if max_new_allowed <= 0:
             continue
             
-        candidates_by_school = {}
-        for c in candidates:
-            if booked_school and c["school"] != booked_school:
-                continue
-            candidates_by_school.setdefault(c["school"], []).append(c)
-            
-        best_school_subset = []
-        best_school_score = (-1, 999999)
-        
-        for school_name, school_candidates in candidates_by_school.items():
-            subset, score = get_best_subset(school_candidates, booked, max_new_allowed)
-            if score > best_school_score:
-                best_school_score = score
-                best_school_subset = subset
-                
-        if best_school_subset:
-            for c in best_school_subset:
+        subset, score = get_best_subset(candidates, booked, max_new_allowed)
+        if subset:
+            for c in subset:
                 all_selected_matches.append({
                     "event_id": c["event_id"],
                     "station_id": c["station_id"],
