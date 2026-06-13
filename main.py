@@ -313,6 +313,62 @@ def is_shift_valid_for_user(ev, user_name, settings, current_cached_data, temp_b
     ev_date_str = ev.get("date", "")
     school_name = format_school_name(ev.get("title", ""))
     
+    # Enforce minimum 2 shifts for multi-shift schools
+    user_schools = settings.get("auto_booking_schools", [])
+    user_stations = settings.get("auto_booking_stations", {})
+    
+    total_school_events = []
+    secured_count = 0
+    
+    if current_cached_data:
+        for cached_ev in current_cached_data:
+            if cached_ev.get("date") == ev_date_str:
+                c_school = format_school_name(cached_ev.get("title", ""))
+                if c_school == school_name:
+                    raw_cat = cached_ev.get("event_type_name", "")
+                    cat = normalize_category(raw_cat, cached_ev.get("title", ""))
+                    clean_cat = clean_category_name(cat)
+                    allowed_nums = user_stations.get(clean_cat, [])
+                    if not allowed_nums:
+                        continue
+                    
+                    total_school_events.append(cached_ev)
+                    
+                    is_user_booked = False
+                    for p in cached_ev.get("participants", []):
+                        p_name = f"{p.get('first_name', '')} {p.get('last_name', '')}".strip().lower()
+                        if p_name == user_name:
+                            is_user_booked = True
+                            break
+                    
+                    is_temp_booked = False
+                    ev_time_str = f"{cached_ev.get('start_time')[:5]}-{cached_ev.get('end_time')[:5]}"
+                    for tb in temp_booked_shifts_on_date:
+                        if tb["school"] == school_name and f"{tb['start_time']}-{tb['end_time']}" == ev_time_str:
+                            is_temp_booked = True
+                            break
+                    
+                    is_current = (cached_ev.get("id") == ev.get("id"))
+                    
+                    if is_user_booked or is_temp_booked or is_current:
+                        secured_count += 1
+                    else:
+                        has_free_station = False
+                        for target_num in allowed_nums:
+                            for s in cached_ev.get("available_stations", []):
+                                if s.get("is_available"):
+                                    num = get_station_num(s.get("name"))
+                                    if num == target_num:
+                                        has_free_station = True
+                                        break
+                            if has_free_station:
+                                break
+                        if has_free_station:
+                            secured_count += 1
+
+    if len(total_school_events) >= 2 and secured_count < 2:
+        return False
+        
     booked_shifts = []
     if current_cached_data:
         for cached_ev in current_cached_data:
