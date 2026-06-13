@@ -132,6 +132,8 @@ def get_auto_booking_settings(chat_id):
     user_f = filters[cid_str]
     if "auto_booking_active" not in user_f:
         user_f["auto_booking_active"] = False
+    if "weekday_intercept_active" not in user_f:
+        user_f["weekday_intercept_active"] = False
     if "auto_booking_schools" not in user_f:
         user_f["auto_booking_schools"] = []
     if "auto_booking_schools_exclude_mode" not in user_f:
@@ -2161,6 +2163,10 @@ async def handle_auto_booking_menu(callback: CallbackQuery):
     settings = get_auto_booking_settings(cid)
     active = settings.get("auto_booking_active", False)
     status_str = "🟢 АКТИВНА" if active else "🔴 ОТКЛЮЧЕНА"
+    
+    weekday_active = settings.get("weekday_intercept_active", False)
+    weekday_status_str = "🟢 АКТИВЕН" if weekday_active else "🔴 ОТКЛЮЧЕН"
+    
     mode = settings.get("auto_booking_mode", "confirm")
     
     if mode == "auto":
@@ -2198,7 +2204,8 @@ async def handle_auto_booking_menu(callback: CallbackQuery):
     text = (
         f"🤖 *АВТОЗАПИСЬ НА КВЕСТЫ*\n\n"
         f"{desc_text}\n\n"
-        f"ℹ️ *Статус автозаписи:* {status_str}\n"
+        f"ℹ️ *Субботняя автозапись:* {status_str}\n"
+        f"⚡ *Фоновый перехват будней:* {weekday_status_str}\n"
         f"⚙️ *Режим записи:* {mode_display}\n"
         f"🏫 *Школы:* _{schools_str}_\n"
         f"🎯 *Станции:* _{stations_str}_\n"
@@ -2208,8 +2215,12 @@ async def handle_auto_booking_menu(callback: CallbackQuery):
         f"Если первая станция будет занята, бот автоматически попробует записать на вторую по приоритету и так далее."
     )
     builder = InlineKeyboardBuilder()
-    toggle_btn_text = "🔴 Выключить автозапись" if active else "🟢 Включить автозапись"
-    builder.row(InlineKeyboardButton(text=toggle_btn_text, callback_data="auto_booking_toggle"))
+    toggle_btn_text = "🔴 Выкл. автозапись" if active else "🟢 Вкл. автозапись"
+    toggle_weekday_text = "🔴 Выкл. перехват" if weekday_active else "🟢 Вкл. перехват"
+    builder.row(
+        InlineKeyboardButton(text=toggle_btn_text, callback_data="auto_booking_toggle"),
+        InlineKeyboardButton(text=toggle_weekday_text, callback_data="weekday_intercept_toggle")
+    )
     
     mode_btn_text = "🔄 Включить Авто-режим" if mode == "confirm" else "🔄 Включить Подтверждение"
     builder.row(InlineKeyboardButton(text=mode_btn_text, callback_data="auto_booking_mode_toggle"))
@@ -2249,6 +2260,19 @@ async def handle_auto_booking_toggle(callback: CallbackQuery):
     except Exception: pass
     settings = get_auto_booking_settings(cid)
     settings["auto_booking_active"] = not settings.get("auto_booking_active", False)
+    save_auto_booking_settings(cid, settings)
+    await handle_auto_booking_menu(callback)
+
+@router.callback_query(F.data == "weekday_intercept_toggle")
+async def handle_weekday_intercept_toggle(callback: CallbackQuery):
+    cid = callback.message.chat.id
+    if not is_linked(cid):
+        await callback.answer("🔒 Пожалуйста, сначала привяжите аккаунт", show_alert=True)
+        return
+    try: await callback.answer()
+    except Exception: pass
+    settings = get_auto_booking_settings(cid)
+    settings["weekday_intercept_active"] = not settings.get("weekday_intercept_active", False)
     save_auto_booking_settings(cid, settings)
     await handle_auto_booking_menu(callback)
 
