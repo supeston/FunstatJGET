@@ -300,6 +300,237 @@ def normalize_category(event_type_name, title=""):
         return "ПДД квест"
     return event_type_name
 
+
+def is_shift_valid_for_user(ev, user_name, settings, current_cached_data, temp_booked_shifts_on_date):
+    ev_date_str = ev.get("date", "")
+    school_name = format_school_name(ev.get("title", ""))
+    
+    booked_shifts = []
+    if current_cached_data:
+        for cached_ev in current_cached_data:
+            if cached_ev.get("date") == ev_date_str:
+                is_user_booked = False
+                for p in cached_ev.get("participants", []):
+                    p_name = f"{p.get('first_name', '')} {p.get('last_name', '')}".strip().lower()
+                    if p_name == user_name:
+                        is_user_booked = True
+                        break
+                # Only add if it's not the exact same event we are currently evaluating
+                if is_user_booked and cached_ev.get("id") != ev.get("id"):
+                    booked_shifts.append({
+                        "start_time": cached_ev.get("start_time")[:5],
+                        "end_time": cached_ev.get("end_time")[:5],
+                        "school": format_school_name(cached_ev.get("title", ""))
+                    })
+                
+    booked_shifts.extend(temp_booked_shifts_on_date)
+                
+    if booked_shifts:
+        for booked in booked_shifts:
+            if booked["school"] != school_name:
+                return False
+        ev_start = ev.get("start_time")[:5]
+        ev_end = ev.get("end_time")[:5]
+        for booked in booked_shifts:
+            if max(ev_start, booked["start_time"]) < min(ev_end, booked["end_time"]):
+                return False
+                
+    max_quests = settings.get("auto_booking_max_quests", 6)
+    if max_quests != "max":
+        if len(booked_shifts) >= int(max_quests):
+            return False
+            
+    return True
+
+
+def get_smart_matches(data, user_name, settings):
+    user_schools = settings.get("auto_booking_schools", [])
+    user_stations = settings.get("auto_booking_stations", {})
+    max_quests = settings.get("auto_booking_max_quests", 6)
+    
+    candidates_by_date = {}
+    now = datetime.now()
+    
+    for ev in data:
+        ev_date_str = ev.get("date", "")
+        try:
+            ev_date = datetime.strptime(ev_date_str, "%Y-%m-%d")
+            if ev_date.date() < now.date():
+                continue
+        except Exception:
+            continue
+            
+        time_mode = settings.get("auto_booking_time_mode", "any")
+        if time_mode == "custom":
+            start_limit = settings.get("auto_booking_time_start", "10:00")
+            end_limit = settings.get("auto_booking_time_end", "15:00")
+            if not (ev.get("start_time")[:5] >= start_limit and ev.get("end_time")[:5] <= end_limit):
+                continue
+                
+        title = ev.get("title", "")
+        school_name = format_school_name(title)
+        if user_schools:
+            exclude_mode = settings.get("auto_booking_schools_exclude_mode", False)
+            if exclude_mode:
+                if school_name in user_schools:
+                    continue
+            else:
+                if school_name not in user_schools:
+                    continue
+                    
+        already_booked = False
+        for p in ev.get("participants", []):
+            p_name = f"{p.get('first_name', '')} {p.get('last_name', '')}".strip().lower()
+            if p_name == user_name:
+                already_booked = True
+                break
+        if already_booked:
+            continue
+            
+        raw_cat = ev.get("event_type_name", "")
+        cat = normalize_category(raw_cat, title)
+        clean_cat = clean_category_name(cat)
+        
+        allowed_nums = user_stations.get(clean_cat, [])
+        if not allowed_nums:
+            continue
+            
+        matched_s = None
+        matched_num = None
+        priority_index = 999999
+        for idx, target_num in enumerate(allowed_nums):
+            for s in ev.get("available_stations", []):
+                if s.get("is_available"):
+                    num = get_station_num(s.get("name"))
+                    if num == target_num:
+                        matched_s = s
+                        matched_num = num
+                        priority_index = idx
+                        break
+            if matched_s:
+                break
+                
+        if matched_s:
+            c = {
+                "event_id": ev.get("id"),
+                "station_id": matched_s.get("id"),
+                "date": ev_date_str,
+                "time": f"{ev.get('start_time')[:5]}-{ev.get('end_time')[:5]}",
+                "start_time": ev.get("start_time")[:5],
+                "end_time": ev.get("end_time")[:5],
+                "school": school_name,
+                "category": clean_cat,
+                "station_num": matched_num,
+                "priority_index": priority_index
+            }
+            candidates_by_date.setdefault(ev_date_str, []).append(c)
+            
+    booked_by_date = {}
+    for ev in data:
+        ev_date_str = ev.get("date", "")
+        is_booked = False
+        for p in ev.get("participants", []):
+            p_name = f"{p.get('first_name', '')} {p.get('last_name', '')}".strip().lower()
+            if p_name == user_name:
+                is_booked = True
+                break
+        if is_booked:
+            booked_by_date.setdefault(ev_date_str, []).append({
+                "start_time": ev.get("start_time")[:5],
+                "end_time": ev.get("end_time")[:5],
+                "school": format_school_name(ev.get("title", ""))
+            })
+            
+    def get_best_subset(candidates, booked_shifts, max_new_allowed):
+        candidates = sorted(candidates, key=lambda x: x['start_time'])
+        best_subset = []
+        best_score = (-1, 999999)
+        
+        def backtrack(index, current_subset):
+            nonlocal best_subset, best_score
+            num_shifts = len(current_subset)
+            sum_priority = sum(c['priority_index'] for c in current_subset)
+            score = (num_shifts, -sum_priority)
+            
+            if score > best_score:
+                best_score = score
+                best_subset = list(current_subset)
+                
+            if num_shifts >= max_new_allowed:
+                return
+                
+            for i in range(index, len(candidates)):
+                c = candidates[i]
+                overlap = False
+                for active in current_subset:
+                    if max(c['start_time'], active['start_time']) < min(c['end_time'], active['end_time']):
+                        overlap = True
+                        break
+                if overlap:
+                    continue
+                for booked in booked_shifts:
+                    if max(c['start_time'], booked['start_time']) < min(c['end_time'], booked['end_time']):
+                        overlap = True
+                        break
+                if overlap:
+                    continue
+                    
+                current_subset.append(c)
+                backtrack(i + 1, current_subset)
+                current_subset.pop()
+                
+        backtrack(0, [])
+        return best_subset, best_score
+
+    all_selected_matches = []
+    all_dates = set(candidates_by_date.keys()) | set(booked_by_date.keys())
+    
+    for date_str in all_dates:
+        candidates = candidates_by_date.get(date_str, [])
+        booked = booked_by_date.get(date_str, [])
+        
+        booked_school = None
+        if booked:
+            booked_school = booked[0]["school"]
+            
+        max_limit = 999999
+        if max_quests != "max":
+            max_limit = int(max_quests)
+            
+        max_new_allowed = max_limit - len(booked)
+        if max_new_allowed <= 0:
+            continue
+            
+        candidates_by_school = {}
+        for c in candidates:
+            if booked_school and c["school"] != booked_school:
+                continue
+            candidates_by_school.setdefault(c["school"], []).append(c)
+            
+        best_school_subset = []
+        best_school_score = (-1, 999999)
+        
+        for school_name, school_candidates in candidates_by_school.items():
+            subset, score = get_best_subset(school_candidates, booked, max_new_allowed)
+            if score > best_school_score:
+                best_school_score = score
+                best_school_subset = subset
+                
+        if best_school_subset:
+            for c in best_school_subset:
+                all_selected_matches.append({
+                    "event_id": c["event_id"],
+                    "station_id": c["station_id"],
+                    "date": c["date"],
+                    "time": c["time"],
+                    "school": c["school"],
+                    "category": c["category"],
+                    "station_num": c["station_num"]
+                })
+                
+    return all_selected_matches
+
+
 def get_user_stats(site_name, events_list):
     current_time = datetime.now()
     user_name_lower = site_name.strip().lower()
@@ -774,7 +1005,7 @@ async def background_weekday_autobooking_loop(bot: Bot):
                     
                     now = datetime.now()
                     async with aiohttp.ClientSession(headers=headers) as session:
-                        booked_today_tracker = {}
+                        newly_booked_shifts = {}
                         for ev in GLOBAL_CACHED_DATA:
                             ev_date_str = ev.get("date", "")
                             try:
@@ -784,14 +1015,10 @@ async def background_weekday_autobooking_loop(bot: Bot):
                             except Exception:
                                 continue
                                 
-                            # Max quests limit check
-                            already_booked_today = get_booked_count_on_day(user_name, ev_date_str)
-                            newly_booked = booked_today_tracker.get(ev_date_str, 0)
-                            max_quests = settings.get("auto_booking_max_quests", 6)
-                            if max_quests != "max" and already_booked_today + newly_booked >= int(max_quests):
+                            temp_booked = newly_booked_shifts.get(ev_date_str, [])
+                            if not is_shift_valid_for_user(ev, user_name, settings, GLOBAL_CACHED_DATA, temp_booked):
                                 continue
                                 
-                            # Time range filter check
                             time_mode = settings.get("auto_booking_time_mode", "any")
                             if time_mode == "custom":
                                 start_limit = settings.get("auto_booking_time_start", "10:00")
@@ -827,7 +1054,6 @@ async def background_weekday_autobooking_loop(bot: Bot):
                             if not allowed_nums:
                                 continue
                                 
-                            # Find the highest priority available station
                             matched_s = None
                             matched_num = None
                             for target_num in allowed_nums:
@@ -846,7 +1072,11 @@ async def background_weekday_autobooking_loop(bot: Bot):
                                 try:
                                     async with session.post(URL_BOOK, json=payload, timeout=5) as r:
                                         if r.status in [200, 201]:
-                                            booked_today_tracker[ev_date_str] = newly_booked + 1
+                                            newly_booked_shifts.setdefault(ev_date_str, []).append({
+                                                "start_time": ev.get("start_time")[:5],
+                                                "end_time": ev.get("end_time")[:5],
+                                                "school": school_name
+                                            })
                                             try:
                                                 dt = datetime.strptime(ev_date_str, "%Y-%m-%d")
                                                 day_w = DAYS_RU.get(dt.weekday(), "")
@@ -1649,79 +1879,7 @@ async def run_saturday_autobooking_precheck(bot: Bot, year_group: int):
             continue
             
         user_name = linked.get(cid_str, {}).get("name", "").strip().lower()
-        user_schools = settings.get("auto_booking_schools", [])
-        user_stations = settings.get("auto_booking_stations", {})
-        
-        matches = []
-        matched_per_date = {}
-        now = datetime.now()
-        for ev in data:
-            ev_date_str = ev.get("date", "")
-            try:
-                ev_date = datetime.strptime(ev_date_str, "%Y-%m-%d")
-                if ev_date.date() < now.date():
-                    continue
-            except Exception:
-                continue
-                
-            # Max quests check
-            already_booked_today = get_booked_count_on_day(user_name, ev_date_str)
-            matched_today = matched_per_date.get(ev_date_str, 0)
-            max_quests = settings.get("auto_booking_max_quests", 6)
-            if max_quests != "max" and already_booked_today + matched_today >= int(max_quests):
-                continue
-
-            # Time range check
-            time_mode = settings.get("auto_booking_time_mode", "any")
-            if time_mode == "custom":
-                start_limit = settings.get("auto_booking_time_start", "10:00")
-                end_limit = settings.get("auto_booking_time_end", "15:00")
-                if not (ev.get("start_time")[:5] >= start_limit and ev.get("end_time")[:5] <= end_limit):
-                    continue
-                
-            title = ev.get("title", "")
-            school_name = format_school_name(title)
-            if user_schools:
-                exclude_mode = settings.get("auto_booking_schools_exclude_mode", False)
-                if exclude_mode:
-                    if school_name in user_schools:
-                        continue
-                else:
-                    if school_name not in user_schools:
-                        continue
-                
-            raw_cat = ev.get("event_type_name", "")
-            cat = normalize_category(raw_cat, title)
-            clean_cat = clean_category_name(cat)
-            
-            allowed_nums = user_stations.get(clean_cat, [])
-            if not allowed_nums:
-                continue
-                
-            matched_s = None
-            matched_num = None
-            for target_num in allowed_nums:
-                for s in ev.get("available_stations", []):
-                    if s.get("is_available"):
-                        num = get_station_num(s.get("name"))
-                        if num == target_num:
-                            matched_s = s
-                            matched_num = num
-                            break
-                if matched_s:
-                    break
-                    
-            if matched_s:
-                matches.append({
-                    "event_id": ev.get("id"),
-                    "station_id": matched_s.get("id"),
-                    "date": ev_date_str,
-                    "time": f"{ev.get('start_time')[:5]}-{ev.get('end_time')[:5]}",
-                    "school": school_name,
-                    "category": clean_cat,
-                    "station_num": matched_num
-                })
-                matched_per_date[ev_date_str] = matched_today + 1
+        matches = get_smart_matches(data, user_name, settings)
                         
         if not matches:
             try:
@@ -1825,74 +1983,7 @@ async def run_saturday_user_autobooking(bot: Bot, year_group: int):
                 cid_str = str(cid)
                 user_name = linked.get(cid_str, {}).get("name", "").strip().lower()
                 settings = get_auto_booking_settings(cid)
-                user_schools = settings.get("auto_booking_schools", [])
-                user_stations = settings.get("auto_booking_stations", {})
-                matches = []
-                matched_per_date = {}
-                for ev in data:
-                    ev_date_str = ev.get("date", "")
-                    try:
-                        ev_date = datetime.strptime(ev_date_str, "%Y-%m-%d")
-                        if ev_date.date() < now.date():
-                            continue
-                    except Exception:
-                        continue
-
-                    # Max quests check
-                    already_booked_today = get_booked_count_on_day(user_name, ev_date_str)
-                    matched_today = matched_per_date.get(ev_date_str, 0)
-                    max_quests = settings.get("auto_booking_max_quests", 6)
-                    if max_quests != "max" and already_booked_today + matched_today >= int(max_quests):
-                        continue
-
-                    # Time range check
-                    time_mode = settings.get("auto_booking_time_mode", "any")
-                    if time_mode == "custom":
-                        start_limit = settings.get("auto_booking_time_start", "10:00")
-                        end_limit = settings.get("auto_booking_time_end", "15:00")
-                        if not (ev.get("start_time")[:5] >= start_limit and ev.get("end_time")[:5] <= end_limit):
-                            continue
-
-                    title = ev.get("title", "")
-                    school_name = format_school_name(title)
-                    if user_schools:
-                        exclude_mode = settings.get("auto_booking_schools_exclude_mode", False)
-                        if exclude_mode:
-                            if school_name in user_schools:
-                                continue
-                        else:
-                            if school_name not in user_schools:
-                                continue
-                    raw_cat = ev.get("event_type_name", "")
-                    cat = normalize_category(raw_cat, title)
-                    clean_cat = clean_category_name(cat)
-                    allowed_nums = user_stations.get(clean_cat, [])
-                    if not allowed_nums:
-                        continue
-                    matched_s = None
-                    matched_num = None
-                    for target_num in allowed_nums:
-                        for s in ev.get("available_stations", []):
-                            if s.get("is_available"):
-                                num = get_station_num(s.get("name"))
-                                if num == target_num:
-                                    matched_s = s
-                                    matched_num = num
-                                    break
-                        if matched_s:
-                            break
-                            
-                    if matched_s:
-                        matches.append({
-                            "event_id": ev.get("id"),
-                            "station_id": matched_s.get("id"),
-                            "date": ev_date_str,
-                            "time": f"{ev.get('start_time')[:5]}-{ev.get('end_time')[:5]}",
-                            "school": school_name,
-                            "category": clean_cat,
-                            "station_num": matched_num
-                        })
-                        matched_per_date[ev_date_str] = matched_today + 1
+                matches = get_smart_matches(data, user_name, settings)
                 if matches:
                     confirmed[cid_str] = matches
 
