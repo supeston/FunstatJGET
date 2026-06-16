@@ -2871,6 +2871,13 @@ async def process_text_input(message: Message, bot: Bot):
         if message.chat.type == "private":
             try: await message.delete()
             except Exception: pass
+
+        msg_id = BOT_MESSAGE_ID.get(cid)
+        if msg_id:
+            try: await bot.delete_message(chat_id=cid, message_id=msg_id)
+            except Exception: pass
+            BOT_MESSAGE_ID.pop(cid, None)
+
         lines = message.text.strip().split("\n")
         if len(lines) < 2:
             await edit_or_send(
