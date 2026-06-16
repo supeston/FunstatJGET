@@ -465,33 +465,33 @@ def get_smart_matches(data, user_name, settings):
         if not allowed_nums:
             continue
             
-        matched_s = None
-        matched_num = None
-        priority_index = 999999
+        valid_stations = []
         for idx, target_num in enumerate(allowed_nums):
             for s in ev.get("available_stations", []):
                 if s.get("is_available"):
                     num = get_station_num(s.get("name"))
                     if num == target_num:
-                        matched_s = s
-                        matched_num = num
-                        priority_index = idx
+                        valid_stations.append({
+                            "station_id": s.get("id"),
+                            "station_num": num,
+                            "priority_index": idx
+                        })
                         break
-            if matched_s:
-                break
                 
-        if matched_s:
+        if valid_stations:
+            best = valid_stations[0]
             c = {
                 "event_id": ev.get("id"),
-                "station_id": matched_s.get("id"),
+                "station_id": best["station_id"],
+                "valid_stations": valid_stations,
                 "date": ev_date_str,
                 "time": f"{ev.get('start_time')[:5]}-{ev.get('end_time')[:5]}",
                 "start_time": ev.get("start_time")[:5],
                 "end_time": ev.get("end_time")[:5],
                 "school": school_name,
                 "category": clean_cat,
-                "station_num": matched_num,
-                "priority_index": priority_index
+                "station_num": best["station_num"],
+                "priority_index": best["priority_index"]
             }
             candidates_by_date.setdefault(ev_date_str, []).append(c)
             
@@ -589,6 +589,7 @@ def get_smart_matches(data, user_name, settings):
                 all_selected_matches.append({
                     "event_id": c["event_id"],
                     "station_id": c["station_id"],
+                    "valid_stations": c["valid_stations"],
                     "date": c["date"],
                     "time": c["time"],
                     "school": c["school"],
@@ -1122,49 +1123,60 @@ async def background_weekday_autobooking_loop(bot: Bot):
                             if not allowed_nums:
                                 continue
                                 
-                            matched_s = None
-                            matched_num = None
+                            valid_stations = []
                             for target_num in allowed_nums:
                                 for s in ev.get("available_stations", []):
                                     if s.get("is_available"):
                                         num = get_station_num(s.get("name"))
                                         if num == target_num:
-                                            matched_s = s
-                                            matched_num = num
+                                            valid_stations.append((s.get("id"), num))
                                             break
-                                if matched_s:
-                                    break
                                     
-                            if matched_s:
-                                payload = {"event": ev.get("id"), "station": matched_s.get("id")}
-                                try:
-                                    async with session.post(URL_BOOK, json=payload, timeout=5) as r:
-                                        if r.status in [200, 201]:
-                                            newly_booked_shifts.setdefault(ev_date_str, []).append({
-                                                "start_time": ev.get("start_time")[:5],
-                                                "end_time": ev.get("end_time")[:5],
-                                                "school": school_name
-                                            })
-                                            try:
-                                                dt = datetime.strptime(ev_date_str, "%Y-%m-%d")
-                                                day_w = DAYS_RU.get(dt.weekday(), "")
-                                                mon = MONTHS_RU.get(dt.month, "")
-                                                date_fmt = f"{dt.day} {mon} ({day_w})"
-                                            except Exception:
-                                                date_fmt = ev_date_str
-                                            
-                                            alert_text = (
-                                                f"🤖 *АВТОЗАПИСЬ: УСПЕШНЫЙ ПЕРЕХВАТ!* 🚀\n\n"
-                                                f"Бот автоматически перехватил и записал вас на смену:\n"
-                                                f"📅 *{date_fmt}* | ⏱️ *{ev.get('start_time')[:5]}-{ev.get('end_time')[:5]}*\n"
-                                                f"🏫 Школа: *{school_name}*\n"
-                                                f"🎯 {clean_cat} | Станция {matched_num}"
-                                            )
-                                            await bot.send_message(chat_id=cid, text=alert_text, parse_mode="Markdown")
-                                        elif r.status == 400:
-                                            pass
-                                except Exception as e:
-                                    print(f"[!] Error in background booking: {e}")
+                            if valid_stations:
+                                booked_ok = False
+                                booked_num = None
+                                for stat_id, stat_num in valid_stations:
+                                    payload = {"event": ev.get("id"), "station": stat_id}
+                                    try:
+                                        async with session.post(URL_BOOK, json=payload, timeout=5) as r:
+                                            if r.status in [200, 201]:
+                                                booked_ok = True
+                                                booked_num = stat_num
+                                                break
+                                            elif r.status == 400:
+                                                try:
+                                                    res = await r.json()
+                                                except Exception:
+                                                    res = {}
+                                                err_msg = str(res.get("error", ""))
+                                                if "Уже записан" in err_msg or "запись закрыта" in err_msg.lower() or "не начата" in err_msg.lower():
+                                                    break
+                                    except Exception as e:
+                                        pass
+                                    await asyncio.sleep(0.5)
+
+                                if booked_ok:
+                                    newly_booked_shifts.setdefault(ev_date_str, []).append({
+                                        "start_time": ev.get("start_time")[:5],
+                                        "end_time": ev.get("end_time")[:5],
+                                        "school": school_name
+                                    })
+                                    try:
+                                        dt = datetime.strptime(ev_date_str, "%Y-%m-%d")
+                                        day_w = DAYS_RU.get(dt.weekday(), "")
+                                        mon = MONTHS_RU.get(dt.month, "")
+                                        date_fmt = f"{dt.day} {mon} ({day_w})"
+                                    except Exception:
+                                        date_fmt = ev_date_str
+                                    
+                                    alert_text = (
+                                        f"🤖 *АВТОЗАПИСЬ: УСПЕШНЫЙ ПЕРЕХВАТ!* 🚀\n\n"
+                                        f"Бот автоматически перехватил и записал вас на смену:\n"
+                                        f"📅 *{date_fmt}* | ⏱️ *{ev.get('start_time')[:5]}-{ev.get('end_time')[:5]}*\n"
+                                        f"🏫 Школа: *{school_name}*\n"
+                                        f"🎯 {clean_cat} | Станция {booked_num}"
+                                    )
+                                    await bot.send_message(chat_id=cid, text=alert_text, parse_mode="Markdown")
                                 await asyncio.sleep(0.5)
         except Exception as ex:
             print(f"[!] Error in background weekday loop: {ex}")
@@ -1644,6 +1656,13 @@ async def handle_today_plan(callback: CallbackQuery):
                     end_time = event.get("end_time", "23:59:59")
                     raw_cat = event.get("event_type_name", "")
                     category = clean_category_name(raw_cat)
+                    
+                    leader_name = "Не назначен"
+                    for participant in event.get("participants", []):
+                        if participant.get("as_leader"):
+                            leader_name = f"{participant.get('first_name', '')} {participant.get('last_name', '')}".strip()
+                            break
+
                     if as_leader:
                         role_str = "Главарь"
                         role_display = "Роль: *Главарь*"
@@ -1653,7 +1672,7 @@ async def handle_today_plan(callback: CallbackQuery):
                         st_name = st_obj.get("name") if isinstance(st_obj, dict) else ""
                         st_num = get_station_num(st_name)
                         role_str = f"Станция: {st_num}" if st_num else "Ведущий"
-                        role_display = f"Станция: *{st_num}*" if st_num else "*Ведущий*"
+                        role_display = f"Станция: *{st_num}* | Ведущий: {leader_name}" if st_num else f"*Ведущий* ({leader_name})"
                         icon = "⭐"
                     target_shifts.append({
                         "school": school_name,
@@ -1665,7 +1684,8 @@ async def handle_today_plan(callback: CallbackQuery):
                         "icon": icon,
                         "category": category,
                         "raw_cat": raw_cat,
-                        "payout": payout
+                        "payout": payout,
+                        "leader_name": leader_name
                     })
     if not target_shifts:
         if is_today:
@@ -1723,7 +1743,8 @@ async def handle_today_plan(callback: CallbackQuery):
                 role_lines = ["⭐ Роли по сменам:"]
                 for s_idx, s in enumerate(block):
                     connector = " ├ " if s_idx < len(block) - 1 else " └ "
-                    role_lines.append(f"  {connector}⏰ *{s['start_time'][:5]} - {s['end_time'][:5]}* — {s['icon']} *{s['role']}*")
+                    leader_info = "" if s['role'] == "Главарь" else f" (Ведущий: {s['leader_name']})"
+                    role_lines.append(f"  {connector}⏰ *{s['start_time'][:5]} - {s['end_time'][:5]}* — {s['icon']} *{s['role']}*{leader_info}")
                 role_str = "\n".join(role_lines)
             block_fmt = (
                 f"{num_prefix} **[{school}]({geo})**\n"
@@ -2103,28 +2124,38 @@ async def run_saturday_user_autobooking(bot: Bot, year_group: int):
         }
         
         async def book_target(session, t):
-            payload = {"event": t["event_id"], "station": t["station_id"]}
+            valid_stats = t.get("valid_stations", [{"station_id": t["station_id"], "station_num": t["station_num"]}])
             book_start = asyncio.get_event_loop().time()
-            while asyncio.get_event_loop().time() - book_start < 10:
-                try:
-                    async with session.post(URL_BOOK, json=payload, timeout=5) as r:
-                        if r.status in [200, 201]:
-                            return True, None
-                        elif r.status == 400:
-                            res = await r.json()
-                            err_msg = res.get("error", "")
-                            if "Уже записан" in err_msg:
-                                return True, "already"
-                            elif "запись закрыта" in err_msg.lower() or "не начата" in err_msg.lower():
-                                await asyncio.sleep(0.1)
-                                continue
+            
+            for st in valid_stats:
+                payload = {"event": t["event_id"], "station": st["station_id"]}
+                t["station_num"] = st["station_num"]
+                
+                while asyncio.get_event_loop().time() - book_start < 10:
+                    try:
+                        async with session.post(URL_BOOK, json=payload, timeout=5) as r:
+                            if r.status in [200, 201]:
+                                return True, None
+                            elif r.status == 400:
+                                try:
+                                    res = await r.json()
+                                except Exception:
+                                    res = {}
+                                err_msg = str(res.get("error", ""))
+                                if "Уже записан" in err_msg:
+                                    return True, "already"
+                                elif "запись закрыта" in err_msg.lower() or "не начата" in err_msg.lower():
+                                    await asyncio.sleep(0.1)
+                                    continue
+                                else:
+                                    break
                             else:
-                                return False, err_msg
-                        else:
-                            return False, f"HTTP status {r.status}"
-                except Exception:
-                    await asyncio.sleep(0.1)
-            return False, "Превышено время ожидания"
+                                break
+                    except Exception:
+                        await asyncio.sleep(0.1)
+                else:
+                    return False, "Превышено время ожидания"
+            return False, "Все станции заняты или ошибка"
             
         async with aiohttp.ClientSession(headers=headers) as session:
             results = await asyncio.gather(*[book_target(session, t) for t in targets])
