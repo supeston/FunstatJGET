@@ -2316,7 +2316,13 @@ async def handle_auto_booking_menu(callback: CallbackQuery):
     
     mode_btn_text = "🔄 Включить Авто-режим" if mode == "confirm" else "🔄 Включить Подтверждение"
     builder.row(InlineKeyboardButton(text=mode_btn_text, callback_data="auto_booking_mode_toggle"))
-    
+    builder.row(InlineKeyboardButton(text="⚙️ Настройки", callback_data="auto_booking_settings_menu"))
+    builder.row(InlineKeyboardButton(text="↩️ Главное меню", callback_data="main_menu"))
+    await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=builder.as_markup())
+
+@router.callback_query(F.data == "auto_booking_settings_menu")
+async def handle_auto_booking_settings_menu(callback: CallbackQuery):
+    builder = InlineKeyboardBuilder()
     builder.row(
         InlineKeyboardButton(text="🏫 Школы", callback_data="auto_booking_select_schools"),
         InlineKeyboardButton(text="🎯 Станции", callback_data="auto_booking_select_stations")
@@ -2325,7 +2331,9 @@ async def handle_auto_booking_menu(callback: CallbackQuery):
         InlineKeyboardButton(text="⏱️ Время", callback_data="auto_booking_select_time"),
         InlineKeyboardButton(text="🎮 Кол-во квестов", callback_data="auto_booking_select_max_quests")
     )
-    builder.row(InlineKeyboardButton(text="↩️ Главное меню", callback_data="main_menu"))
+    builder.row(InlineKeyboardButton(text="↩️ Назад в Автозапись", callback_data="auto_booking_menu"))
+    
+    text = "⚙️ *НАСТРОЙКИ АВТОЗАПИСИ*\n\nВыберите параметр для настройки:"
     await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=builder.as_markup())
 
 @router.callback_query(F.data == "auto_booking_mode_toggle")
@@ -2408,7 +2416,7 @@ async def handle_auto_booking_select_schools(callback: CallbackQuery):
     for i in range(0, len(school_btns), 2):
         builder.row(*school_btns[i:i+2])
         
-    builder.row(InlineKeyboardButton(text="↩️ Назад", callback_data="auto_booking_menu"))
+    builder.row(InlineKeyboardButton(text="↩️ Назад", callback_data="auto_booking_settings_menu"))
     
     mode_desc = (
         "🚫 *Режим исключения:* бот будет ловить смены во ВСЕХ школах, *кроме* отмеченных ниже галочкой.\n\n"
@@ -2483,7 +2491,7 @@ async def handle_auto_booking_select_stations(callback: CallbackQuery):
     categories = ["ПДД", "Спасатель", "Дружба", "Сокровища", "Бриллианты"]
     for cat in categories:
         builder.row(InlineKeyboardButton(text=f"🎯 {cat}", callback_data=f"auto_bk_cat_{cat}"))
-    builder.row(InlineKeyboardButton(text="↩️ Назад", callback_data="auto_booking_menu"))
+    builder.row(InlineKeyboardButton(text="↩️ Назад", callback_data="auto_booking_settings_menu"))
     await callback.message.edit_text(
         "🎯 *ВЫБОР ФАВОРИТ-СТАНЦИЙ*\n\nВыберите категорию квеста для настройки номеров станций:",
         parse_mode="Markdown", reply_markup=builder.as_markup()
@@ -2594,7 +2602,7 @@ async def handle_auto_booking_select_time(callback: CallbackQuery):
     cust_check = "✅ " if time_mode == "custom" else ""
     builder.row(InlineKeyboardButton(text=f"{any_check}Любое время", callback_data="auto_booking_time_mode_any"))
     builder.row(InlineKeyboardButton(text=f"{cust_check}Указать свой интервал", callback_data="auto_booking_time_mode_custom"))
-    builder.row(InlineKeyboardButton(text="↩️ Назад", callback_data="auto_booking_menu"))
+    builder.row(InlineKeyboardButton(text="↩️ Назад", callback_data="auto_booking_settings_menu"))
     
     await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=builder.as_markup())
 
@@ -2670,7 +2678,7 @@ async def handle_auto_booking_select_max_quests(callback: CallbackQuery):
             
     max_check = "✅ " if current_max == "max" else ""
     builder.row(InlineKeyboardButton(text=f"{max_check}♾️ Максимально", callback_data="auto_booking_max_quests_set_max"))
-    builder.row(InlineKeyboardButton(text="↩️ Назад", callback_data="auto_booking_menu"))
+    builder.row(InlineKeyboardButton(text="↩️ Назад", callback_data="auto_booking_settings_menu"))
     
     await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=builder.as_markup())
 
