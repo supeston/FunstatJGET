@@ -1397,6 +1397,11 @@ async def handle_user_profile(callback: CallbackQuery):
     tg_name = f"{tg_user.first_name or ''} {tg_user.last_name or ''}".strip()
 
     site_name = acc.get("name", "Неизвестно")
+    
+    safe_site_name = site_name.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+    safe_tg_name = tg_name.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+    safe_tg_username = tg_username.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+    
     token = acc.get("token")
     conducted = acc.get("conducted", 0)
     cancelled = acc.get("cancelled", 0)
@@ -1425,7 +1430,7 @@ async def handle_user_profile(callback: CallbackQuery):
         player_lates = stats["player_lates"]
         total_hours = stats["total_hours"]
 
-    site_extra = f"\n📊 Проведено: *{conducted}* | Отмен: *{cancelled}* | ⏰ Опозданий: *{lates}* | ⏳ Часов: *{total_hours}*"
+    site_extra = f"\n📊 Проведено: <b>{conducted}</b> | Отмен: <b>{cancelled}</b> | ⏰ Опозданий: <b>{lates}</b> | ⏳ Часов: <b>{total_hours}</b>"
 
     already_earned = conducted * PAYOUT_PLAYER
     if stats:
@@ -1469,20 +1474,20 @@ async def handle_user_profile(callback: CallbackQuery):
     year_str = "Первый год (первогодник, 12:00)" if exp_year == 1 else "Второй год (второгодник, 10:00)"
 
     text = (
-        f"👤 *ПРОФИЛЬ*\n\n"
-        f"📛 Имя на сайте: *{site_name}*\n"
-        f"💬 Telegram: *{tg_name}* ({tg_username})\n"
-        f"🆔 Telegram ID: `{tg_id}`\n"
-        f"📞 Телефон: `{phone_fmt}`\n"
-        f"🎓 Год обучения: *{year_str}*"
+        f"👤 <b>ПРОФИЛЬ</b>\n\n"
+        f"📛 Имя на сайте: <b>{safe_site_name}</b>\n"
+        f"💬 Telegram: <b>{safe_tg_name}</b> ({safe_tg_username})\n"
+        f"🆔 Telegram ID: <code>{tg_id}</code>\n"
+        f"📞 Телефон: <code>{phone_fmt}</code>\n"
+        f"🎓 Год обучения: <b>{year_str}</b>"
         f"{site_extra}\n\n"
-        f"💰 Уже заработано: *{already_earned}* ₽\n"
-        f"⏳ В ожидании: *{expected_earnings}* ₽\n"
-        f"🔥 Всего за месяц: *{total_for_month}* ₽\n\n"
-        f"⚠️ *ВАЖНО:* Вы должны строго выбрать свой *реальный* статус! "
+        f"💰 Уже заработано: <b>{already_earned}</b> ₽\n"
+        f"⏳ В ожидании: <b>{expected_earnings}</b> ₽\n"
+        f"🔥 Всего за месяц: <b>{total_for_month}</b> ₽\n\n"
+        f"<blockquote expandable>⚠️ <b>ВАЖНО:</b> Вы должны строго выбрать свой <b>реальный</b> статус! "
         f"Если вы выберете второй год будучи первогодником, бот попытается записать вас в 10:00 и получит ошибку сайта. "
         f"Если вы выберете первый год будучи второгодником, бот начнет запись только в 12:00, "
-        f"когда другие второгодники уже займут все лучшие места."
+        f"когда другие второгодники уже займут все лучшие места.</blockquote>"
     )
     now = datetime.now()
     today_str = now.strftime("%Y-%m-%d")
@@ -1552,7 +1557,7 @@ async def handle_user_profile(callback: CallbackQuery):
     builder.row(
         InlineKeyboardButton(text="↩️ Главное меню", callback_data="main_menu")
     )
-    await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=builder.as_markup())
+    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=builder.as_markup())
 
 @router.callback_query(F.data == "profile_toggle_year")
 async def handle_profile_toggle_year(callback: CallbackQuery):
