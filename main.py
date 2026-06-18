@@ -1544,11 +1544,7 @@ async def handle_user_profile(callback: CallbackQuery):
         f"💰 Уже заработано: <b>{already_earned}</b> ₽\n"
         f"⏳ В ожидании: <b>{expected_earnings}</b> ₽\n"
         f"🔥 Всего за месяц: <b>{total_for_month}</b> ₽\n"
-        f"{library_str}\n"
-        f"<blockquote expandable>⚠️ <b>ВАЖНО:</b> Вы должны строго выбрать свой <b>реальный</b> статус! "
-        f"Если вы выберете второй год будучи первогодником, бот попытается записать вас в 10:00 и получит ошибку сайта. "
-        f"Если вы выберете первый год будучи второгодником, бот начнет запись только в 12:00, "
-        f"когда другие второгодники уже займут все лучшие места.</blockquote>"
+        f"{library_str}"
     )
     now = datetime.now()
     today_str = now.strftime("%Y-%m-%d")
@@ -1890,6 +1886,8 @@ async def handle_guides_menu(callback: CallbackQuery):
     builder = InlineKeyboardBuilder()
     builder.row(InlineKeyboardButton(text="🤖 Инструкция к автозаписи", callback_data="guide_autobooking"))
     builder.row(InlineKeyboardButton(text="👤 Управление профилем и баланс", callback_data="guide_profile"))
+    builder.row(InlineKeyboardButton(text="🏆 Глобальные Топы и Библиотеки", callback_data="guide_tops"))
+    builder.row(InlineKeyboardButton(text="⚠️ Важная информация", callback_data="guide_important"))
     builder.row(InlineKeyboardButton(text="❓ Общие вопросы и F.A.Q.", callback_data="guide_faq"))
     builder.row(InlineKeyboardButton(text="↩️ Главное меню", callback_data="main_menu"))
     
@@ -1939,6 +1937,49 @@ async def handle_guide_profile(callback: CallbackQuery):
         "• *Всего за месяц:* общая сумма (заработанное + ожидаемое).\n\n"
         "🗺️ *План на сегодня/завтра:*\n"
         "• Отображает список ваших смен, точное время, школы и роли на выбранный день с удобной кнопкой навигации на Яндекс Карты."
+    )
+    builder = InlineKeyboardBuilder()
+    builder.row(InlineKeyboardButton(text="↩️ К гайдам", callback_data="guides_menu"))
+    await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=builder.as_markup())
+
+@router.callback_query(F.data == "guide_important")
+async def handle_guide_important(callback: CallbackQuery):
+    try: await callback.answer()
+    except Exception: pass
+    
+    text = (
+        "⚠️ *ВАЖНАЯ ИНФОРМАЦИЯ И ПРАВИЛА*\n\n"
+        "❗️ *Выбор года обучения (Статуса):*\n"
+        "Вы должны строго выбрать свой *реальный* статус (первогодник или второгодник).\n"
+        "• Если вы выберете *второй год* будучи первогодником, бот попытается записать вас в 10:00 и получит ошибку сайта.\n"
+        "• Если вы выберете *первый год* будучи второгодником, бот начнет запись только в 12:00, когда другие второгодники уже займут все лучшие места.\n\n"
+        "❗️ *Ответственность за автозапись:*\n"
+        "Бот берет на себя рутину по бронированию смен, но посещение смен и выполнение работы остается на вас. Не забывайте отменять смены, если не сможете прийти!"
+    )
+    builder = InlineKeyboardBuilder()
+    builder.row(InlineKeyboardButton(text="↩️ К гайдам", callback_data="guides_menu"))
+    await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=builder.as_markup())
+
+@router.callback_query(F.data == "guide_tops")
+async def handle_guide_tops(callback: CallbackQuery):
+    try: await callback.answer()
+    except Exception: pass
+    
+    text = (
+        "🏆 *ГЛОБАЛЬНЫЕ ТОПЫ И БИБЛИОТЕКИ ЧАСОВ*\n\n"
+        "Теперь в боте есть продвинутая система соревнований и персональной статистики!\n\n"
+        "📚 *Библиотеки Часов (в Профиле):*\n"
+        "Скрытый блок в вашем профиле показывает суммарное отработанное время (в часах) в разрезе:\n"
+        "• Любимых школ (локаций)\n"
+        "• Любимых квестов (например, ПДД, Дружба)\n"
+        "• Ваших самых популярных ролей/станций\n\n"
+        "🏆 *Глобальные Топы (Главное меню):*\n"
+        "Вы можете соревноваться со всеми пользователями бота! Доступны 7 категорий:\n"
+        "1. *Топ по часам* — кто больше всех отработал?\n"
+        "2. *Топ Главарей* / *Топ Игроков* — лидеры по ролям.\n"
+        "3. *Топ Опозданий* — антирейтинг пунктуальности.\n"
+        "4. *Тематические топы* — лидеры в квестах Дружба, ПДД и в локации Адымнар.\n\n"
+        "💡 _Используйте стрелочки под топом, чтобы переключаться между разными категориями лидербордов!_"
     )
     builder = InlineKeyboardBuilder()
     builder.row(InlineKeyboardButton(text="↩️ К гайдам", callback_data="guides_menu"))
