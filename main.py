@@ -809,66 +809,58 @@ def generate_osint_dossier(target_first_name, target_last_name):
                 "as_leader": as_leader
             }
             
-            if ev_date and ev_date >= today_date:
-                upcoming_shifts.append(shift_info)
-            else:
-                past_shifts.append(shift_info)
-                
-            if attended:
-                attended_count += 1
-                if as_leader:
-                    leader_count += 1
-                else:
-                    player_count += 1
-                    if late:
-                        player_lates += 1
-                if late:
-                    late_count += 1
-                    
-                quest_mins = 65
+            # Check if event is completed (in the past)
+            is_completed = False
+            current_time = datetime.now()
+            try:
+                full_end_str = f"{date_str} {event.get('end_time', '23:59:59')[:8]}"
+                event_end_dt = datetime.strptime(full_end_str, "%Y-%m-%d %H:%M:%S")
+                if event_end_dt <= current_time:
+                    is_completed = True
+            except Exception:
                 try:
-                    ts = datetime.strptime(event.get("start_time")[:8], "%H:%M:%S")
-                    te = datetime.strptime(event.get("end_time")[:8], "%H:%M:%S")
-                    diff_mins = (te - ts).total_seconds() / 60
-                    if diff_mins > 0:
-                        quest_mins = diff_mins
+                    ev_date_obj = datetime.strptime(date_str, "%Y-%m-%d").date()
+                    if ev_date_obj < current_time.date():
+                        is_completed = True
                 except Exception:
                     pass
-                total_work_mins = quest_mins + 40
-                total_minutes += total_work_mins
-                
-                school_counts[school_name] = school_counts.get(school_name, 0) + 1
-                category_counts[category] = category_counts.get(category, 0) + 1
-                station_counts[role_str] = station_counts.get(role_str, 0) + 1
+                    
+            if is_completed:
+                past_shifts.append(shift_info)
+                if attended:
+                    attended_count += 1
+                    if as_leader:
+                        leader_count += 1
+                    else:
+                        player_count += 1
+                        if late:
+                            player_lates += 1
+                    if late:
+                        late_count += 1
+                        
+                    quest_mins = 65
+                    try:
+                        ts = datetime.strptime(event.get("start_time")[:8], "%H:%M:%S")
+                        te = datetime.strptime(event.get("end_time")[:8], "%H:%M:%S")
+                        diff_mins = (te - ts).total_seconds() / 60
+                        if diff_mins > 0:
+                            quest_mins = diff_mins
+                    except Exception:
+                        pass
+                    total_work_mins = quest_mins + 40
+                    total_minutes += total_work_mins
+                    
+                    school_counts[school_name] = school_counts.get(school_name, 0) + total_work_mins
+                    category_counts[category] = category_counts.get(category, 0) + total_work_mins
+                    station_counts[role_str] = station_counts.get(role_str, 0) + total_work_mins
+                else:
+                    skipped_count += 1
             else:
-                skipped_count += 1
+                upcoming_shifts.append(shift_info)
                 
-    attendance_rate = round((attended_count / total_booked) * 100, 1) if total_booked > 0 else 0.0
-    late_rate = round((late_count / attended_count) * 100, 1) if attended_count > 0 else 0.0
-    total_hours = round(total_minutes / 60, 1)
-    avg_shift_len = round(total_minutes / attended_count, 1) if attended_count > 0 else 0.0
-    
-    earned_leader = leader_count * PAYOUT_LEADER
-    earned_player = (player_count - player_lates) * PAYOUT_PLAYER + player_lates * 400
-    total_earned = earned_leader + earned_player
-    late_penalties = player_lates * (PAYOUT_PLAYER - 400)
-    avg_hourly_pay = round(total_earned / (total_minutes / 60), 1) if total_minutes > 0 else 0.0
-    
-    top_schools = sorted(school_counts.items(), key=lambda x: x[1], reverse=True)[:3]
-    top_schools_str = "\n".join([f"  • {sch}: {round(mins/60, 1)} ч." for sch, mins in top_schools]) if top_schools else "  _Нет сведений_"
-    
-    top_cats = sorted(category_counts.items(), key=lambda x: x[1], reverse=True)[:3]
-    top_cats_str = "\n".join([f"  • {cat}: {round(mins/60, 1)} ч." for cat, mins in top_cats]) if top_cats else "  _Нет сведений_"
-    
-    top_stations = sorted(station_counts.items(), key=lambda x: x[1], reverse=True)[:3]
-    top_stations_str = "\n".join([f"  • {role}: {round(mins/60, 1)} ч." for role, mins in top_stations]) if top_stations else "  _Нет сведений_"
-    
-    upcoming_shifts = sorted(upcoming_shifts, key=lambda x: x["date"])
-    past_shifts = sorted(past_shifts, key=lambda x: x["date"], reverse=True)
-    
     linked_tg_info = None
-    conducted_lifetime = "Н/Д"
-    cancelled_lifetime = "Н/Д"
+    conducted_lifetime = None
+    cancelled_lifetime = None
     accounts = load_linked_accounts()
     for uid_str, acc_val in accounts.items():
         acc_name = acc_val.get("name", "").strip().lower()
@@ -880,8 +872,14 @@ def generate_osint_dossier(target_first_name, target_last_name):
                 "phone": acc_val.get("phone", "Н/Д"),
                 "experience_year": acc_val.get("experience_year", 1)
             }
-            conducted_lifetime = str(acc_val.get("conducted", 0))
-            cancelled_lifetime = str(acc_val.get("cancelled", 0))
+            try:
+                conducted_lifetime = int(acc_val.get("conducted", 0))
+            except Exception:
+                conducted_lifetime = None
+            try:
+                cancelled_lifetime = int(acc_val.get("cancelled", 0))
+            except Exception:
+                cancelled_lifetime = None
             break
             
     tg_part = ""
@@ -901,7 +899,41 @@ def generate_osint_dossier(target_first_name, target_last_name):
         )
     else:
         tg_part = "⚠️ *Telegram-аккаунт не привязан к боту*\n\n"
+
+    total_completed = max(conducted_lifetime or 0, attended_count)
+    uncached_completed = max(0, total_completed - attended_count)
+    
+    cancelled_val = cancelled_lifetime if cancelled_lifetime is not None else skipped_count
+    
+    total_hours_adjusted = round((total_minutes + uncached_completed * 105) / 60, 1)
+    avg_shift_len = round(total_minutes / attended_count, 1) if attended_count > 0 else 0.0
+    
+    attendance_rate = round((total_completed / (total_completed + cancelled_val)) * 100, 1) if (total_completed + cancelled_val) > 0 else 0.0
+    
+    already_earned = 0
+    if attended_count > 0 or uncached_completed > 0:
+        already_earned = (
+            leader_count * PAYOUT_LEADER +
+            (player_count - player_lates) * PAYOUT_PLAYER +
+            player_lates * 400 +
+            uncached_completed * PAYOUT_PLAYER
+        )
         
+    expected_earnings = sum((PAYOUT_LEADER if s["as_leader"] else PAYOUT_PLAYER) for s in upcoming_shifts)
+    total_earned_overall = already_earned + expected_earnings
+    
+    top_schools = sorted(school_counts.items(), key=lambda x: x[1], reverse=True)[:3]
+    top_schools_str = "\n".join([f"  • {sch}: {round(mins/60, 1)} ч." for sch, mins in top_schools]) if top_schools else "  _Нет сведений_"
+    
+    top_cats = sorted(category_counts.items(), key=lambda x: x[1], reverse=True)[:3]
+    top_cats_str = "\n".join([f"  • {cat}: {round(mins/60, 1)} ч." for cat, mins in top_cats]) if top_cats else "  _Нет сведений_"
+    
+    top_stations = sorted(station_counts.items(), key=lambda x: x[1], reverse=True)[:3]
+    top_stations_str = "\n".join([f"  • {role}: {round(mins/60, 1)} ч." for role, mins in top_stations]) if top_stations else "  _Нет сведений_"
+    
+    upcoming_shifts = sorted(upcoming_shifts, key=lambda x: x["date"])
+    past_shifts = sorted(past_shifts, key=lambda x: x["date"], reverse=True)
+    
     upcoming_lines = []
     for s in upcoming_shifts[:5]:
         upcoming_lines.append(f"  • {s['date']} | {s['start_time']} — {s['category']} ({s['role']}) в {s['school']}")
@@ -913,28 +945,21 @@ def generate_osint_dossier(target_first_name, target_last_name):
         attn_str = "" if s["attended"] else " ❌ (Неявка)"
         past_lines.append(f"  • {s['date']} | {s['start_time']} — {s['category']} ({s['role']}){attn_str}{late_symbol}")
     past_str = "\n".join(past_lines) if past_lines else "  _История смен пуста_"
-    
+
     return (
         f"👤 *ДОСЬЕ: {target_first_name} {target_last_name}*\n\n"
         f"{tg_part}"
-        f"📊 *ОБЩАЯ СТАТИСТИКА (база бота):*\n"
-        f"  ├ Всего записей: *{total_booked}*\n"
-        f"  ├ Посещено смен: *{attended_count}* (👑 Главарь: {leader_count} | 🏃 Игрок: {player_count})\n"
-        f"  ├ Пропущено смен: *{skipped_count}*\n"
+        f"📊 *ОБЩАЯ СТАТИСТИКА:*\n"
+        f"  ├ Проведено смен: *{total_completed}*\n"
+        f"  ├ Отменено смен: *{cancelled_val}*\n"
         f"  ├ Количество опозданий: *{late_count}*\n"
-        f"  ├ Отработано времени: *{total_hours}* ч\n"
+        f"  ├ Отработано времени: *{total_hours_adjusted}* ч\n"
         f"  ├ Среднее время смены: *{avg_shift_len}* мин\n"
-        f"  ├ Процент посещаемости: *{attendance_rate}%*\n"
-        f"  └ Процент опозданий: *{late_rate}%*\n\n"
-        f"💼 *ОФИЦИАЛЬНАЯ СТАТИСТИКА (с сайта):*\n"
-        f"  ├ Проведено смен: *{conducted_lifetime}*\n"
-        f"  └ Отмен смен: *{cancelled_lifetime}*\n\n"
+        f"  └ Процент посещаемости: *{attendance_rate}%*\n\n"
         f"💰 *ФИНАНСОВЫЙ ОТЧЕТ:*\n"
-        f"  ├ Всего начислено: *{total_earned}* ₽\n"
-        f"  ├ Из них за Главаря: *{earned_leader}* ₽\n"
-        f"  ├ Из них за Игрока: *{earned_player}* ₽\n"
-        f"  ├ Вычеты за опоздания: *{late_penalties}* ₽\n"
-        f"  └ Средняя ставка: *{avg_hourly_pay}* ₽/час\n\n"
+        f"  ├ Уже заработано: *{already_earned}* ₽\n"
+        f"  ├ В ожидании: *{expected_earnings}* ₽\n"
+        f"  └ Всего заработано: *{total_earned_overall}* ₽\n\n"
         f"📚 *БИБЛИОТЕКА ЛОКАЦИЙ (Школы):*\n{top_schools_str}\n\n"
         f"📚 *БИБЛИОТЕКА КВЕСТОВ:*\n{top_cats_str}\n\n"
         f"📚 *БИБЛИОТЕКА СТАНЦИЙ:*\n{top_stations_str}\n\n"
@@ -1506,19 +1531,41 @@ async def handle_user_profile(callback: CallbackQuery):
 
     lates = 0
     player_lates = 0
-    total_hours = 0.0
+    cached_hours = 0.0
     total_cached_completed = 0
-    already_earned = 0
     stats = None
     if GLOBAL_CACHED_DATA:
         stats = get_user_stats(site_name, list(PERSISTENT_EVENTS.values()))
         lates = stats["lates"]
         player_lates = stats["player_lates"]
-        total_hours = stats["total_hours"]
+        cached_hours = stats["total_hours"]
         cached_leader = stats["completed_leader"]
         cached_player = stats["completed_player"]
         total_cached_completed = cached_leader + cached_player
-        already_earned = cached_leader * PAYOUT_LEADER + (cached_player - player_lates) * PAYOUT_PLAYER + player_lates * 400
+
+    try:
+        conducted_val = int(conducted)
+    except Exception:
+        conducted_val = total_cached_completed
+
+    try:
+        cancelled_val = int(cancelled)
+    except Exception:
+        cancelled_val = 0
+
+    total_completed = max(conducted_val, total_cached_completed)
+    uncached_completed = max(0, total_completed - total_cached_completed)
+    
+    already_earned = 0
+    if total_cached_completed > 0 or uncached_completed > 0:
+        already_earned = (
+            (stats["completed_leader"] if stats else 0) * PAYOUT_LEADER +
+            ((stats["completed_player"] if stats else 0) - player_lates) * PAYOUT_PLAYER +
+            player_lates * 400 +
+            uncached_completed * PAYOUT_PLAYER
+        )
+        
+    total_hours = round(cached_hours + uncached_completed * 1.75, 1)
 
     expected_earnings = 0
     if GLOBAL_CACHED_DATA:
@@ -1575,10 +1622,10 @@ async def handle_user_profile(callback: CallbackQuery):
         f"💬 Telegram: <b>{safe_tg_name}</b> ({safe_tg_username})\n"
         f"🆔 Telegram ID: <code>{tg_id}</code>\n"
         f"📞 Телефон: <code>{phone_fmt}</code>\n"
-        f"🎓 Год обучения: <b>{year_str}</b>\n"
-        f"📊 Проведено смен (сайт): <b>{conducted}</b> | Отмен: <b>{cancelled}</b>\n\n"
-        f"📅 <b>ОБЩАЯ СТАТИСТИКА (база бота):</b>\n"
-        f"  • Проведено смен: <b>{total_cached_completed}</b>\n"
+        f"🎓 Год обучения: <b>{year_str}</b>\n\n"
+        f"📊 <b>ОБЩАЯ СТАТИСТИКА:</b>\n"
+        f"  • Проведено смен: <b>{total_completed}</b>\n"
+        f"  • Отменено смен: <b>{cancelled_val}</b>\n"
         f"  • Опозданий: <b>{lates}</b>\n"
         f"  • Отработано времени: <b>{total_hours}</b> ч.\n\n"
         f"💰 <b>ФИНАНСЫ:</b>\n"
@@ -3355,11 +3402,7 @@ def calculate_tops(is_admin):
         "early_birds": {"title": "🌅 Ранние пташки", "data": {}},
         "night_owls": {"title": "🌌 Вечерние совы", "data": {}},
         "perfect": {"title": "✅ Идеальная пунктуальность", "data": {}},
-        "non_attendance": {"title": "❌ Топ Прогулов", "data": {}},
-        
-        # Роли
-        "station_worker": {"title": "🎯 Лучший Станционник", "data": {}},
-        "host": {"title": "🎤 Лучший Ведущий", "data": {}}
+        "non_attendance": {"title": "❌ Топ Прогулов", "data": {}}
     }
     
     if not PERSISTENT_EVENTS:
@@ -3444,16 +3487,6 @@ def calculate_tops(is_admin):
             if not late:
                 tops["perfect"]["data"][uid]["val"] += 1
                 
-            st_obj = p.get("station")
-            st_name = st_obj.get("name") if isinstance(st_obj, dict) else ""
-            st_num = get_station_num(st_name)
-            
-            if not as_leader:
-                if st_num and 1 <= st_num <= 10:
-                    tops["station_worker"]["data"][uid]["val"] += total_work_mins
-                else:
-                    tops["host"]["data"][uid]["val"] += total_work_mins
-                
             if start_hour < 10:
                 tops["early_birds"]["data"][uid]["val"] += 1
             elif start_hour >= 15:
@@ -3461,7 +3494,7 @@ def calculate_tops(is_admin):
                 
     for key in tops:
         raw_list = list(tops[key]["data"].values())
-        if key in ["hours", "station_worker", "host"]:
+        if key in ["hours"]:
             for r in raw_list:
                 r["val"] = round(r["val"] / 60, 1)
         raw_list = [r for r in raw_list if r["val"] > 0]
@@ -3473,8 +3506,7 @@ def calculate_tops(is_admin):
 TOP_IDS = [
     "hours", "earn", "veterans", "leaders", "players", "lates",
     "druzhba", "pdd", "spasatel", "diamonds", "treasures",
-    "weekend_warriors", "early_birds", "night_owls", "perfect", "non_attendance",
-    "station_worker", "host"
+    "weekend_warriors", "early_birds", "night_owls", "perfect", "non_attendance"
 ]
 
 def get_tops_menu(top_index, tops_data):
@@ -3497,8 +3529,10 @@ def get_tops_menu(top_index, tops_data):
     else:
         for i, item in enumerate(page_data, start=1):
             val = item["val"]
-            if top_id == "hours" or top_id.startswith("station_"):
+            if top_id == "hours":
                 val_str = f"{val} ч."
+            elif top_id == "earn":
+                val_str = f"{val} ₽"
             elif top_id in ["lates", "early_birds", "night_owls", "non_attendance"]:
                 val_str = f"{val} раз(а)"
             else:
