@@ -69,6 +69,8 @@ TEMP_AUTO_BOOKINGS = {}
 OSINT_SEARCH_RESULTS = {}
 
 GLOBAL_CACHED_DATA = None
+PERSISTENT_EVENTS_FILE = "persistent_events.json"
+PERSISTENT_EVENTS = {}
 
 VIP_NAMES = ["макар", "радэль", "радель", "ярик", "карим"]
 
@@ -76,6 +78,37 @@ def is_vip(site_name: str) -> bool:
     if not site_name:
         return False
     return any(vip in site_name.lower() for vip in VIP_NAMES)
+
+def load_persistent_events():
+    global PERSISTENT_EVENTS
+    if os.path.exists(PERSISTENT_EVENTS_FILE):
+        try:
+            with open(PERSISTENT_EVENTS_FILE, "r", encoding="utf-8") as f:
+                PERSISTENT_EVENTS = json.load(f)
+        except Exception as e:
+            print(f"[{datetime.now().strftime('%H:%M:%S')}] Ошибка чтения {PERSISTENT_EVENTS_FILE}: {e}")
+            PERSISTENT_EVENTS = {}
+    else:
+        PERSISTENT_EVENTS = {}
+
+def save_persistent_events():
+    try:
+        with open(PERSISTENT_EVENTS_FILE, "w", encoding="utf-8") as f:
+            json.dump(PERSISTENT_EVENTS, f, indent=4, ensure_ascii=False)
+    except Exception as e:
+        print(f"[{datetime.now().strftime('%H:%M:%S')}] Ошибка записи {PERSISTENT_EVENTS_FILE}: {e}")
+
+def merge_into_persistent(new_events):
+    global PERSISTENT_EVENTS
+    updated = False
+    for ev in new_events:
+        ev_id = str(ev.get("id"))
+        if ev_id and ev_id != "None":
+            if ev_id not in PERSISTENT_EVENTS or PERSISTENT_EVENTS[ev_id] != ev:
+                PERSISTENT_EVENTS[ev_id] = ev
+                updated = True
+    if updated:
+        save_persistent_events()
 
 router = Router()
 
@@ -726,8 +759,8 @@ def generate_osint_dossier(target_first_name, target_last_name):
     target_fn_lower = target_first_name.strip().lower()
     target_ln_lower = target_last_name.strip().lower()
     
-    if GLOBAL_CACHED_DATA:
-        for event in GLOBAL_CACHED_DATA:
+    if PERSISTENT_EVENTS:
+        for event in PERSISTENT_EVENTS.values():
             user_p = None
             for p in event.get("participants", []):
                 p_fn = p.get("first_name", "").strip().lower()
@@ -884,7 +917,7 @@ def generate_osint_dossier(target_first_name, target_last_name):
     return (
         f"👤 *ДОСЬЕ: {target_first_name} {target_last_name}*\n\n"
         f"{tg_part}"
-        f"📊 *ОСНОВНАЯ СТАТИСТИКА ЗА МЕСЯЦ:*\n"
+        f"📊 *ОБЩАЯ СТАТИСТИКА (база бота):*\n"
         f"  ├ Всего записей: *{total_booked}*\n"
         f"  ├ Посещено смен: *{attended_count}* (👑 Главарь: {leader_count} | 🏃 Игрок: {player_count})\n"
         f"  ├ Пропущено смен: *{skipped_count}*\n"
@@ -893,10 +926,10 @@ def generate_osint_dossier(target_first_name, target_last_name):
         f"  ├ Среднее время смены: *{avg_shift_len}* мин\n"
         f"  ├ Процент посещаемости: *{attendance_rate}%*\n"
         f"  └ Процент опозданий: *{late_rate}%*\n\n"
-        f"💼 *СТАТИСТИКА ЗА ВСЁ ВРЕМЯ (с сайта):*\n"
+        f"💼 *ОФИЦИАЛЬНАЯ СТАТИСТИКА (с сайта):*\n"
         f"  ├ Проведено смен: *{conducted_lifetime}*\n"
         f"  └ Отмен смен: *{cancelled_lifetime}*\n\n"
-        f"💰 *ФИНАНСОВЫЙ ОТЧЕТ ЗА МЕСЯЦ:*\n"
+        f"💰 *ФИНАНСОВЫЙ ОТЧЕТ:*\n"
         f"  ├ Всего начислено: *{total_earned}* ₽\n"
         f"  ├ Из них за Главаря: *{earned_leader}* ₽\n"
         f"  ├ Из них за Игрока: *{earned_player}* ₽\n"
@@ -1057,6 +1090,7 @@ async def background_cache_updater():
         data, err = await fetch_all_data()
         if not err and data:
             GLOBAL_CACHED_DATA = data
+            merge_into_persistent(data)
             print(f"[{datetime.now().strftime('%H:%M:%S')}] Глобальный кэш успешно обновлен.")
         else:
             print(f"[{datetime.now().strftime('%H:%M:%S')}] Ошибка фонового обновления: {err}")
@@ -1477,7 +1511,7 @@ async def handle_user_profile(callback: CallbackQuery):
     already_earned = 0
     stats = None
     if GLOBAL_CACHED_DATA:
-        stats = get_user_stats(site_name, GLOBAL_CACHED_DATA)
+        stats = get_user_stats(site_name, list(PERSISTENT_EVENTS.values()))
         lates = stats["lates"]
         player_lates = stats["player_lates"]
         total_hours = stats["total_hours"]
@@ -1542,15 +1576,15 @@ async def handle_user_profile(callback: CallbackQuery):
         f"🆔 Telegram ID: <code>{tg_id}</code>\n"
         f"📞 Телефон: <code>{phone_fmt}</code>\n"
         f"🎓 Год обучения: <b>{year_str}</b>\n"
-        f"📊 Проведено (за всё время): <b>{conducted}</b> | Отмен: <b>{cancelled}</b>\n\n"
-        f"📅 <b>СТАТИСТИКА ЗА МЕСЯЦ:</b>\n"
+        f"📊 Проведено смен (сайт): <b>{conducted}</b> | Отмен: <b>{cancelled}</b>\n\n"
+        f"📅 <b>ОБЩАЯ СТАТИСТИКА (база бота):</b>\n"
         f"  • Проведено смен: <b>{total_cached_completed}</b>\n"
         f"  • Опозданий: <b>{lates}</b>\n"
         f"  • Отработано времени: <b>{total_hours}</b> ч.\n\n"
-        f"💰 <b>ФИНАНСЫ ЗА МЕСЯЦ:</b>\n"
+        f"💰 <b>ФИНАНСЫ:</b>\n"
         f"  • Уже заработано: <b>{already_earned}</b> ₽\n"
         f"  • В ожидании: <b>{expected_earnings}</b> ₽\n"
-        f"  • Всего за месяц: <b>{total_for_month}</b> ₽\n"
+        f"  • Всего заработано: <b>{total_for_month}</b> ₽\n"
         f"{library_str}"
     )
     now = datetime.now()
@@ -2863,7 +2897,7 @@ async def handle_shift_log(callback: CallbackQuery):
             reply_markup=get_back_btn("user_profile")
         )
         return
-    stats = get_user_stats(site_name, GLOBAL_CACHED_DATA)
+    stats = get_user_stats(site_name, list(PERSISTENT_EVENTS.values()))
     if not stats or not stats["history"]:
         await callback.message.edit_text(
             "📜 *ЛОГ СМЕН*\n\nИстория смен пуста.",
@@ -3303,6 +3337,8 @@ def format_name_for_top(first_name, last_name, is_admin):
 def calculate_tops(is_admin):
     tops = {
         "hours": {"title": "⏳ Топ по часам", "data": {}},
+        "earn": {"title": "💰 Топ Заработка", "data": {}},
+        "veterans": {"title": "🎖 Ветераны (Всего смен)", "data": {}},
         "leaders": {"title": "👑 Топ Главарей", "data": {}},
         "players": {"title": "🏃 Топ Игроков", "data": {}},
         "lates": {"title": "⏰ Топ Опозданий", "data": {}},
@@ -3314,34 +3350,22 @@ def calculate_tops(is_admin):
         "diamonds": {"title": "💎 Топ Бриллиантов", "data": {}},
         "treasures": {"title": "🗺 Топ Сокровищ", "data": {}},
         
-        # Школы
-        "adymnar": {"title": "🏫 Топ Адымнара", "data": {}},
-        "school_17": {"title": "🏫 Топ Школы №17", "data": {}},
-        "gym_26": {"title": "🏫 Топ Гимназии №26", "data": {}},
-        "licey_78": {"title": "🏫 Топ Лицея №78", "data": {}},
-        "school_35": {"title": "🏫 Топ Школы №35", "data": {}},
-        "licey_36": {"title": "🏫 Топ Лицея №36", "data": {}},
-        "gym_57": {"title": "🏫 Топ Гимназии №57", "data": {}},
-        "school_41": {"title": "🏫 Топ Школы №41", "data": {}},
-        "school_19": {"title": "🏫 Топ Школы №19", "data": {}},
-        
-        # Станции
-        "station_1": {"title": "🎯 Топ Станции №1", "data": {}},
-        "station_2": {"title": "🎯 Топ Станции №2", "data": {}},
-        "station_3": {"title": "🎯 Топ Станции №3", "data": {}},
-        "station_4": {"title": "🎯 Топ Станции №4", "data": {}},
-        "station_5": {"title": "🎯 Топ Станции №5", "data": {}},
-        
-        # Поведение
+        # Разное
+        "weekend_warriors": {"title": "🎉 Герои Выходных", "data": {}},
         "early_birds": {"title": "🌅 Ранние пташки", "data": {}},
         "night_owls": {"title": "🌌 Вечерние совы", "data": {}},
-        "non_attendance": {"title": "❌ Топ Прогулов", "data": {}}
+        "perfect": {"title": "✅ Идеальная пунктуальность", "data": {}},
+        "non_attendance": {"title": "❌ Топ Прогулов", "data": {}},
+        
+        # Роли
+        "station_worker": {"title": "🎯 Лучший Станционник", "data": {}},
+        "host": {"title": "🎤 Лучший Ведущий", "data": {}}
     }
     
-    if not GLOBAL_CACHED_DATA:
+    if not PERSISTENT_EVENTS:
         return tops
         
-    for event in GLOBAL_CACHED_DATA:
+    for event in PERSISTENT_EVENTS.values():
         title = event.get("title", "")
         school_name = format_school_name(title)
         raw_cat = event.get("event_type_name", "")
@@ -3401,38 +3425,34 @@ def calculate_tops(is_admin):
             elif cat == "Сокровища":
                 tops["treasures"]["data"][uid]["val"] += 1
                 
-            if school_name == "Адымнар":
-                tops["adymnar"]["data"][uid]["val"] += 1
-            elif school_name == "Школа №17":
-                tops["school_17"]["data"][uid]["val"] += 1
-            elif school_name == "Гимназия №26":
-                tops["gym_26"]["data"][uid]["val"] += 1
-            elif school_name == "Лицей №78":
-                tops["licey_78"]["data"][uid]["val"] += 1
-            elif school_name == "Школа №35":
-                tops["school_35"]["data"][uid]["val"] += 1
-            elif school_name == "Лицей №36":
-                tops["licey_36"]["data"][uid]["val"] += 1
-            elif school_name == "Гимназия №57":
-                tops["gym_57"]["data"][uid]["val"] += 1
-            elif school_name == "Школа №41":
-                tops["school_41"]["data"][uid]["val"] += 1
-            elif school_name == "Школа №19":
-                tops["school_19"]["data"][uid]["val"] += 1
+            # Additional tops
+            tops["veterans"]["data"][uid]["val"] += 1
+            try:
+                ev_date = datetime.strptime(event.get("date", ""), "%Y-%m-%d")
+                if ev_date.weekday() >= 5:
+                    tops["weekend_warriors"]["data"][uid]["val"] += 1
+            except Exception:
+                pass
+                
+            if as_leader:
+                tops["earn"]["data"][uid]["val"] += PAYOUT_LEADER
+            else:
+                tops["earn"]["data"][uid]["val"] += PAYOUT_PLAYER
+                if late:
+                    tops["earn"]["data"][uid]["val"] -= (PAYOUT_PLAYER - 400)
+            
+            if not late:
+                tops["perfect"]["data"][uid]["val"] += 1
                 
             st_obj = p.get("station")
             st_name = st_obj.get("name") if isinstance(st_obj, dict) else ""
             st_num = get_station_num(st_name)
-            if st_num == 1:
-                tops["station_1"]["data"][uid]["val"] += total_work_mins
-            elif st_num == 2:
-                tops["station_2"]["data"][uid]["val"] += total_work_mins
-            elif st_num == 3:
-                tops["station_3"]["data"][uid]["val"] += total_work_mins
-            elif st_num == 4:
-                tops["station_4"]["data"][uid]["val"] += total_work_mins
-            elif st_num == 5:
-                tops["station_5"]["data"][uid]["val"] += total_work_mins
+            
+            if not as_leader:
+                if st_num and 1 <= st_num <= 10:
+                    tops["station_worker"]["data"][uid]["val"] += total_work_mins
+                else:
+                    tops["host"]["data"][uid]["val"] += total_work_mins
                 
             if start_hour < 10:
                 tops["early_birds"]["data"][uid]["val"] += 1
@@ -3441,7 +3461,7 @@ def calculate_tops(is_admin):
                 
     for key in tops:
         raw_list = list(tops[key]["data"].values())
-        if key == "hours" or key.startswith("station_"):
+        if key in ["hours", "station_worker", "host"]:
             for r in raw_list:
                 r["val"] = round(r["val"] / 60, 1)
         raw_list = [r for r in raw_list if r["val"] > 0]
@@ -3451,11 +3471,10 @@ def calculate_tops(is_admin):
     return tops
 
 TOP_IDS = [
-    "hours", "leaders", "players", "lates",
+    "hours", "earn", "veterans", "leaders", "players", "lates",
     "druzhba", "pdd", "spasatel", "diamonds", "treasures",
-    "adymnar", "school_17", "gym_26", "licey_78", "school_35", "licey_36", "gym_57", "school_41", "school_19",
-    "station_1", "station_2", "station_3", "station_4", "station_5",
-    "early_birds", "night_owls", "non_attendance"
+    "weekend_warriors", "early_birds", "night_owls", "perfect", "non_attendance",
+    "station_worker", "host"
 ]
 
 def get_tops_menu(top_index, tops_data):
@@ -3531,6 +3550,7 @@ async def handle_tops_nav(callback: CallbackQuery):
 
 async def main():
     global GLOBAL_CACHED_DATA
+    load_persistent_events()
     bot = Bot(token=BOT_TOKEN)
     dp = Dispatcher()
     dp.include_router(router)
@@ -3538,6 +3558,7 @@ async def main():
     data, err = await fetch_all_data()
     if not err and data:
         GLOBAL_CACHED_DATA = data
+        merge_into_persistent(data)
         print("[+] Кэш инициализирован. Запуск...")
     else:
         print("[!] Запуск с пустым кэшем.")
