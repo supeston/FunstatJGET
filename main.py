@@ -1214,11 +1214,12 @@ def get_main_menu(chat_id=None):
             builder.row(
                 InlineKeyboardButton(text="🤖 Автозапись", callback_data="auto_booking_menu")
             )
-    if chat_id and chat_id == ADMIN_ID:
-        builder.row(
-            InlineKeyboardButton(text="👑 Админ-панель", callback_data="admin_panel"),
-            InlineKeyboardButton(text="🔍 ОСИНТ Поиск", callback_data="osint_search_start")
-        )
+    is_admin = chat_id and chat_id == ADMIN_ID
+    if is_admin:
+        builder.row(InlineKeyboardButton(text="🔍 ОСИНТ Поиск", callback_data="osint_search_start"))
+
+    builder.row(InlineKeyboardButton(text="🏆 Топы", callback_data="tops_nav_0"))
+    
     row_buttons = []
     if chat_id and is_linked(chat_id):
         row_buttons.append(InlineKeyboardButton(text="👤 Профиль", callback_data="user_profile"))
@@ -1227,7 +1228,10 @@ def get_main_menu(chat_id=None):
     
     row_buttons.append(InlineKeyboardButton(text="📚 Гайды", callback_data="guides_menu"))
     builder.row(*row_buttons)
-    builder.row(InlineKeyboardButton(text="🏆 Топы", callback_data="tops_menu_select"))
+    
+    if is_admin:
+        builder.row(InlineKeyboardButton(text="👑 Админ-панель", callback_data="admin_panel"))
+
     return builder.as_markup()
 
 def get_back_btn(target="main_menu"):
@@ -1738,7 +1742,7 @@ async def handle_today_plan(callback: CallbackQuery):
                                     p_role = f"Станция {p_st_num}" if p_st_num else "Ведущий"
                                 friend_list.append(f"{p_fn} ({p_role})")
                         if friend_list:
-                            friends = "\n  🤝 Свои на смене: *" + ", ".join(friend_list) + "*"
+                            friends = "\n🤝 Свои на смене: *" + ", ".join(friend_list) + "*"
 
                     target_shifts.append({
                         "school": school_name,
@@ -3327,32 +3331,27 @@ def calculate_tops(is_admin):
         
     return tops
 
-def get_tops_menu(top_id, page, tops_data):
+TOP_IDS = ["hours", "leaders", "players", "lates", "druzhba", "pdd", "adymnar"]
+
+def get_tops_menu(top_index, tops_data):
+    if top_index < 0:
+        top_index = len(TOP_IDS) - 1
+    elif top_index >= len(TOP_IDS):
+        top_index = 0
+        
+    top_id = TOP_IDS[top_index]
     top_info = tops_data.get(top_id)
     if not top_info:
         return None, None
         
     items_per_page = 15
-    sorted_data = top_info["sorted"]
-    total_items = len(sorted_data)
-    total_pages = (total_items + items_per_page - 1) // items_per_page
-    if total_pages == 0:
-        total_pages = 1
-        
-    if page < 1:
-        page = 1
-    elif page > total_pages:
-        page = total_pages
-        
-    start_idx = (page - 1) * items_per_page
-    end_idx = start_idx + items_per_page
-    page_data = sorted_data[start_idx:end_idx]
+    page_data = top_info["sorted"][:items_per_page]
     
     text = f"🏆 <b>{top_info['title']}</b>\n\n"
     if not page_data:
         text += "<i>Пока нет данных...</i>\n"
     else:
-        for i, item in enumerate(page_data, start=start_idx + 1):
+        for i, item in enumerate(page_data, start=1):
             val = item["val"]
             if top_id == "hours":
                 val_str = f"{val} ч."
@@ -3365,21 +3364,16 @@ def get_tops_menu(top_id, page, tops_data):
             
     builder = InlineKeyboardBuilder()
     
-    nav_buttons = []
-    if page > 1:
-        nav_buttons.append(InlineKeyboardButton(text="⬅️", callback_data=f"tops_nav_{top_id}_{page-1}"))
-    else:
-        nav_buttons.append(InlineKeyboardButton(text="⏹", callback_data="ignore"))
-        
-    nav_buttons.append(InlineKeyboardButton(text=f"Стр. {page}/{total_pages}", callback_data="ignore"))
+    prev_idx = top_index - 1 if top_index > 0 else len(TOP_IDS) - 1
+    next_idx = top_index + 1 if top_index < len(TOP_IDS) - 1 else 0
     
-    if page < total_pages:
-        nav_buttons.append(InlineKeyboardButton(text="➡️", callback_data=f"tops_nav_{top_id}_{page+1}"))
-    else:
-        nav_buttons.append(InlineKeyboardButton(text="⏹", callback_data="ignore"))
+    nav_buttons = [
+        InlineKeyboardButton(text="⬅️ Пред. топ", callback_data=f"tops_nav_{prev_idx}"),
+        InlineKeyboardButton(text=f"{top_index + 1}/{len(TOP_IDS)}", callback_data="ignore"),
+        InlineKeyboardButton(text="След. топ ➡️", callback_data=f"tops_nav_{next_idx}")
+    ]
         
     builder.row(*nav_buttons)
-    builder.row(InlineKeyboardButton(text=f"📜 Выбрать топ ({top_info['title']})", callback_data="tops_menu_select"))
     builder.row(InlineKeyboardButton(text="↩️ Главное меню", callback_data="main_menu"))
     
     return text, builder.as_markup()
@@ -3388,28 +3382,14 @@ def get_tops_menu(top_id, page, tops_data):
 async def handle_ignore(callback: CallbackQuery):
     await callback.answer()
 
-@router.callback_query(F.data == "tops_menu_select")
-async def handle_tops_menu_select(callback: CallbackQuery):
-    builder = InlineKeyboardBuilder()
-    builder.row(InlineKeyboardButton(text="⏳ Топ по часам", callback_data="tops_nav_hours_1"))
-    builder.row(InlineKeyboardButton(text="👑 Топ Главарей", callback_data="tops_nav_leaders_1"))
-    builder.row(InlineKeyboardButton(text="🏃 Топ Игроков", callback_data="tops_nav_players_1"))
-    builder.row(InlineKeyboardButton(text="⏰ Топ Опозданий", callback_data="tops_nav_lates_1"))
-    builder.row(InlineKeyboardButton(text="🤝 Топ Дружбы", callback_data="tops_nav_druzhba_1"))
-    builder.row(InlineKeyboardButton(text="🚗 Топ ПДД", callback_data="tops_nav_pdd_1"))
-    builder.row(InlineKeyboardButton(text="🏫 Топ Адымнара", callback_data="tops_nav_adymnar_1"))
-    builder.row(InlineKeyboardButton(text="↩️ Главное меню", callback_data="main_menu"))
-    await callback.message.edit_text("🏆 Выбери категорию топа:", reply_markup=builder.as_markup())
-
 @router.callback_query(F.data.startswith("tops_nav_"))
 async def handle_tops_nav(callback: CallbackQuery):
     parts = callback.data.split("_")
-    if len(parts) >= 4:
-        top_id = parts[2]
+    if len(parts) >= 3:
         try:
-            page = int(parts[3])
+            top_index = int(parts[2])
         except ValueError:
-            page = 1
+            top_index = 0
             
         cid = callback.message.chat.id
         is_admin = (cid == ADMIN_ID)
@@ -3417,7 +3397,7 @@ async def handle_tops_nav(callback: CallbackQuery):
         await callback.answer()
         
         tops_data = calculate_tops(is_admin)
-        text, markup = get_tops_menu(top_id, page, tops_data)
+        text, markup = get_tops_menu(top_index, tops_data)
         if text:
             try:
                 await callback.message.edit_text(text, parse_mode="HTML", reply_markup=markup)
