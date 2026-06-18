@@ -1145,7 +1145,7 @@ async def background_weekday_autobooking_loop(bot: Bot):
                     if cid_str not in linked:
                         continue
                     settings = get_auto_booking_settings(cid)
-                    if not settings.get("auto_booking_active", False):
+                    if not settings.get("weekday_intercept_active", False):
                         continue
                     
                     user_name = linked[cid_str].get("name", "").strip().lower()
@@ -2017,12 +2017,12 @@ async def handle_guide_profile(callback: CallbackQuery):
         "• *Проведено:* общее число завершенных смен.\n"
         "• *Отмен:* количество отмененных смен.\n"
         "• *Опозданий:* количество смен с отметкой об опоздании.\n"
-        "• *Часов:* суммарное время работы на смене (+40 минут на подготовку к каждой).\n\n"
+        "• *Часов:* суммарное время работы (1 смена = 1 час).\n\n"
         "💰 *Финансовый учет:*\n"
         "• Расчет ведется по ставкам: *1000 ₽* за Главаря, *500 ₽* за Игрока (или *400 ₽* при опоздании).\n"
-        "• *Уже заработано:* сумма за прошедшие смены в этом месяце.\n"
+        "• *Уже заработано:* сумма за все прошедшие смены.\n"
         "• *В ожидании:* сумма за будущие смены, на которые вы уже записаны.\n"
-        "• *Всего за месяц:* общая сумма (заработанное + ожидаемое).\n\n"
+        "• *Всего заработано:* общая сумма (заработанное + ожидаемое).\n\n"
         "🗺️ *План на сегодня/завтра:*\n"
         "• Отображает список ваших смен, точное время, школы и роли на выбранный день с удобной кнопкой навигации на Яндекс Карты."
     )
@@ -3062,6 +3062,13 @@ async def process_text_input(message: Message, bot: Bot):
                     ln = p.get("last_name", "").strip()
                     if fn or ln:
                         unique_names.add((fn, ln))
+        if PERSISTENT_EVENTS:
+            for event in PERSISTENT_EVENTS.values():
+                for p in event.get("participants", []):
+                    fn = p.get("first_name", "").strip()
+                    ln = p.get("last_name", "").strip()
+                    if fn or ln:
+                        unique_names.add((fn, ln))
                         
         matches = []
         for fn, ln in unique_names:
@@ -3408,11 +3415,29 @@ def calculate_tops(is_admin):
     if not PERSISTENT_EVENTS:
         return tops
         
+    current_time = datetime.now()
     for event in PERSISTENT_EVENTS.values():
         title = event.get("title", "")
         school_name = format_school_name(title)
         raw_cat = event.get("event_type_name", "")
         cat = clean_category_name(normalize_category(raw_cat, title))
+        
+        date_str = event.get("date", "")
+        is_completed = False
+        try:
+            full_end_str = f"{date_str} {event.get('end_time', '23:59:59')[:8]}"
+            event_end_dt = datetime.strptime(full_end_str, "%Y-%m-%d %H:%M:%S")
+            if event_end_dt <= current_time:
+                is_completed = True
+        except Exception:
+            try:
+                ev_date_obj = datetime.strptime(date_str, "%Y-%m-%d").date()
+                if ev_date_obj < current_time.date():
+                    is_completed = True
+            except Exception:
+                pass
+        if not is_completed:
+            continue
         
         quest_mins = 60
         start_hour = 12
