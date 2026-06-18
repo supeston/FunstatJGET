@@ -3299,9 +3299,36 @@ def calculate_tops(is_admin):
         "leaders": {"title": "👑 Топ Главарей", "data": {}},
         "players": {"title": "🏃 Топ Игроков", "data": {}},
         "lates": {"title": "⏰ Топ Опозданий", "data": {}},
+        
+        # Квесты
         "druzhba": {"title": "🤝 Топ Дружбы", "data": {}},
         "pdd": {"title": "🚗 Топ ПДД", "data": {}},
-        "adymnar": {"title": "🏫 Топ Адымнара", "data": {}}
+        "spasatel": {"title": "🚨 Топ Спасателей", "data": {}},
+        "diamonds": {"title": "💎 Топ Бриллиантов", "data": {}},
+        "treasures": {"title": "🗺 Топ Сокровищ", "data": {}},
+        
+        # Школы
+        "adymnar": {"title": "🏫 Топ Адымнара", "data": {}},
+        "school_17": {"title": "🏫 Топ Школы №17", "data": {}},
+        "gym_26": {"title": "🏫 Топ Гимназии №26", "data": {}},
+        "licey_78": {"title": "🏫 Топ Лицея №78", "data": {}},
+        "school_35": {"title": "🏫 Топ Школы №35", "data": {}},
+        "licey_36": {"title": "🏫 Топ Лицея №36", "data": {}},
+        "gym_57": {"title": "🏫 Топ Гимназии №57", "data": {}},
+        "school_41": {"title": "🏫 Топ Школы №41", "data": {}},
+        "school_19": {"title": "🏫 Топ Школы №19", "data": {}},
+        
+        # Станции
+        "station_1": {"title": "🎯 Топ Станции №1", "data": {}},
+        "station_2": {"title": "🎯 Топ Станции №2", "data": {}},
+        "station_3": {"title": "🎯 Топ Станции №3", "data": {}},
+        "station_4": {"title": "🎯 Топ Станции №4", "data": {}},
+        "station_5": {"title": "🎯 Топ Станции №5", "data": {}},
+        
+        # Поведение
+        "early_birds": {"title": "🌅 Ранние пташки", "data": {}},
+        "night_owls": {"title": "🌌 Вечерние совы", "data": {}},
+        "non_attendance": {"title": "❌ Топ Прогулов", "data": {}}
     }
     
     if not GLOBAL_CACHED_DATA:
@@ -3314,20 +3341,19 @@ def calculate_tops(is_admin):
         cat = clean_category_name(normalize_category(raw_cat, title))
         
         quest_mins = 65
+        start_hour = 12
         try:
             ts = datetime.strptime(event.get("start_time")[:8], "%H:%M:%S")
             te = datetime.strptime(event.get("end_time")[:8], "%H:%M:%S")
             diff_mins = (te - ts).total_seconds() / 60
             if diff_mins > 0:
                 quest_mins = diff_mins
+            start_hour = ts.hour
         except Exception:
             pass
         total_work_mins = quest_mins + 40
         
         for p in event.get("participants", []):
-            if not p.get("attended", True):
-                continue
-            
             fn = p.get("first_name", "")
             ln = p.get("last_name", "")
             if not fn and not ln:
@@ -3343,6 +3369,10 @@ def calculate_tops(is_admin):
                 for key in tops:
                     tops[key]["data"][uid] = {"name": name_fmt, "val": 0}
             
+            if not p.get("attended", True):
+                tops["non_attendance"]["data"][uid]["val"] += 1
+                continue
+                
             tops["hours"]["data"][uid]["val"] += total_work_mins
             
             if as_leader:
@@ -3357,13 +3387,54 @@ def calculate_tops(is_admin):
                 tops["druzhba"]["data"][uid]["val"] += 1
             elif cat == "ПДД":
                 tops["pdd"]["data"][uid]["val"] += 1
+            elif cat == "Спасатель":
+                tops["spasatel"]["data"][uid]["val"] += 1
+            elif cat == "Бриллианты":
+                tops["diamonds"]["data"][uid]["val"] += 1
+            elif cat == "Сокровища":
+                tops["treasures"]["data"][uid]["val"] += 1
                 
-            if "Адымнар" in school_name:
+            if school_name == "Адымнар":
                 tops["adymnar"]["data"][uid]["val"] += 1
+            elif school_name == "Школа №17":
+                tops["school_17"]["data"][uid]["val"] += 1
+            elif school_name == "Гимназия №26":
+                tops["gym_26"]["data"][uid]["val"] += 1
+            elif school_name == "Лицей №78":
+                tops["licey_78"]["data"][uid]["val"] += 1
+            elif school_name == "Школа №35":
+                tops["school_35"]["data"][uid]["val"] += 1
+            elif school_name == "Лицей №36":
+                tops["licey_36"]["data"][uid]["val"] += 1
+            elif school_name == "Гимназия №57":
+                tops["gym_57"]["data"][uid]["val"] += 1
+            elif school_name == "Школа №41":
+                tops["school_41"]["data"][uid]["val"] += 1
+            elif school_name == "Школа №19":
+                tops["school_19"]["data"][uid]["val"] += 1
+                
+            st_obj = p.get("station")
+            st_name = st_obj.get("name") if isinstance(st_obj, dict) else ""
+            st_num = get_station_num(st_name)
+            if st_num == 1:
+                tops["station_1"]["data"][uid]["val"] += total_work_mins
+            elif st_num == 2:
+                tops["station_2"]["data"][uid]["val"] += total_work_mins
+            elif st_num == 3:
+                tops["station_3"]["data"][uid]["val"] += total_work_mins
+            elif st_num == 4:
+                tops["station_4"]["data"][uid]["val"] += total_work_mins
+            elif st_num == 5:
+                tops["station_5"]["data"][uid]["val"] += total_work_mins
+                
+            if start_hour < 10:
+                tops["early_birds"]["data"][uid]["val"] += 1
+            elif start_hour >= 15:
+                tops["night_owls"]["data"][uid]["val"] += 1
                 
     for key in tops:
         raw_list = list(tops[key]["data"].values())
-        if key == "hours":
+        if key == "hours" or key.startswith("station_"):
             for r in raw_list:
                 r["val"] = round(r["val"] / 60, 1)
         raw_list = [r for r in raw_list if r["val"] > 0]
@@ -3372,7 +3443,13 @@ def calculate_tops(is_admin):
         
     return tops
 
-TOP_IDS = ["hours", "leaders", "players", "lates", "druzhba", "pdd", "adymnar"]
+TOP_IDS = [
+    "hours", "leaders", "players", "lates",
+    "druzhba", "pdd", "spasatel", "diamonds", "treasures",
+    "adymnar", "school_17", "gym_26", "licey_78", "school_35", "licey_36", "gym_57", "school_41", "school_19",
+    "station_1", "station_2", "station_3", "station_4", "station_5",
+    "early_birds", "night_owls", "non_attendance"
+]
 
 def get_tops_menu(top_index, tops_data):
     if top_index < 0:
@@ -3394,9 +3471,9 @@ def get_tops_menu(top_index, tops_data):
     else:
         for i, item in enumerate(page_data, start=1):
             val = item["val"]
-            if top_id == "hours":
+            if top_id == "hours" or top_id.startswith("station_"):
                 val_str = f"{val} ч."
-            elif top_id == "lates":
+            elif top_id in ["lates", "early_birds", "night_owls", "non_attendance"]:
                 val_str = f"{val} раз(а)"
             else:
                 val_str = f"{val} смен"
