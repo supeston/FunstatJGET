@@ -669,16 +669,16 @@ def get_user_stats(site_name, events_list):
         if not user_p:
             continue
             
-        quest_mins = 65
+        quest_mins = 60
         try:
             ts = datetime.strptime(event.get("start_time")[:8], "%H:%M:%S")
             te = datetime.strptime(event.get("end_time")[:8], "%H:%M:%S")
             diff_mins = (te - ts).total_seconds() / 60
             if diff_mins > 0:
-                quest_mins = diff_mins
+                quest_mins = round(diff_mins)
         except Exception:
             pass
-        total_work_mins = quest_mins + 40
+        total_work_mins = quest_mins
         
         is_completed = False
         try:
@@ -838,16 +838,16 @@ def generate_osint_dossier(target_first_name, target_last_name):
                     if late:
                         late_count += 1
                         
-                    quest_mins = 65
+                    quest_mins = 60
                     try:
                         ts = datetime.strptime(event.get("start_time")[:8], "%H:%M:%S")
                         te = datetime.strptime(event.get("end_time")[:8], "%H:%M:%S")
                         diff_mins = (te - ts).total_seconds() / 60
                         if diff_mins > 0:
-                            quest_mins = diff_mins
+                            quest_mins = round(diff_mins)
                     except Exception:
                         pass
-                    total_work_mins = quest_mins + 40
+                    total_work_mins = quest_mins
                     total_minutes += total_work_mins
                     
                     school_counts[school_name] = school_counts.get(school_name, 0) + total_work_mins
@@ -905,7 +905,7 @@ def generate_osint_dossier(target_first_name, target_last_name):
     
     cancelled_val = cancelled_lifetime if cancelled_lifetime is not None else skipped_count
     
-    total_hours_adjusted = round((total_minutes + uncached_completed * 105) / 60, 1)
+    total_hours_adjusted = round((total_minutes + uncached_completed * 60) / 60, 1)
     avg_shift_len = round(total_minutes / attended_count, 1) if attended_count > 0 else 0.0
     
     attendance_rate = round((total_completed / (total_completed + cancelled_val)) * 100, 1) if (total_completed + cancelled_val) > 0 else 0.0
@@ -1565,7 +1565,7 @@ async def handle_user_profile(callback: CallbackQuery):
             uncached_completed * PAYOUT_PLAYER
         )
         
-    total_hours = round(cached_hours + uncached_completed * 1.75, 1)
+    total_hours = round(cached_hours + uncached_completed * 1.0, 1)
 
     expected_earnings = 0
     if GLOBAL_CACHED_DATA:
@@ -3414,18 +3414,18 @@ def calculate_tops(is_admin):
         raw_cat = event.get("event_type_name", "")
         cat = clean_category_name(normalize_category(raw_cat, title))
         
-        quest_mins = 65
+        quest_mins = 60
         start_hour = 12
         try:
             ts = datetime.strptime(event.get("start_time")[:8], "%H:%M:%S")
             te = datetime.strptime(event.get("end_time")[:8], "%H:%M:%S")
             diff_mins = (te - ts).total_seconds() / 60
             if diff_mins > 0:
-                quest_mins = diff_mins
+                quest_mins = round(diff_mins)
             start_hour = ts.hour
         except Exception:
             pass
-        total_work_mins = quest_mins + 40
+        total_work_mins = quest_mins
         
         for p in event.get("participants", []):
             fn = p.get("first_name", "")
@@ -3492,6 +3492,31 @@ def calculate_tops(is_admin):
             elif start_hour >= 15:
                 tops["night_owls"]["data"][uid]["val"] += 1
                 
+    accounts = load_linked_accounts()
+    for acc in accounts.values():
+        name = acc.get("name", "")
+        if not name:
+            continue
+        parts = name.strip().split()
+        if len(parts) >= 2:
+            fn = parts[0]
+            ln = parts[1]
+        else:
+            fn = name
+            ln = ""
+        uid = f"{fn.lower()}_{ln.lower()}"
+        conducted_val = acc.get("conducted", 0)
+        
+        if uid in tops["veterans"]["data"]:
+            cached_veterans = tops["veterans"]["data"][uid]["val"]
+            if conducted_val > cached_veterans:
+                uncached = conducted_val - cached_veterans
+                tops["veterans"]["data"][uid]["val"] += uncached
+                if uid in tops["hours"]["data"]:
+                    tops["hours"]["data"][uid]["val"] += uncached * 60
+                if uid in tops["earn"]["data"]:
+                    tops["earn"]["data"][uid]["val"] += uncached * PAYOUT_PLAYER
+
     for key in tops:
         raw_list = list(tops[key]["data"].values())
         if key in ["hours"]:
