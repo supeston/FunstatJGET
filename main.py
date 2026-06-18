@@ -834,17 +834,21 @@ def generate_osint_dossier(target_first_name, target_last_name):
     past_shifts = sorted(past_shifts, key=lambda x: x["date"], reverse=True)
     
     linked_tg_info = None
+    conducted_lifetime = "Н/Д"
+    cancelled_lifetime = "Н/Д"
     accounts = load_linked_accounts()
-    for uid_str, acc in accounts.items():
-        acc_name = acc.get("name", "").strip().lower()
+    for uid_str, acc_val in accounts.items():
+        acc_name = acc_val.get("name", "").strip().lower()
         target_full = f"{target_first_name} {target_last_name}".strip().lower()
         target_rev = f"{target_last_name} {target_first_name}".strip().lower()
         if acc_name == target_full or acc_name == target_rev:
             linked_tg_info = {
                 "chat_id": uid_str,
-                "phone": acc.get("phone", "Н/Д"),
-                "experience_year": acc.get("experience_year", 1)
+                "phone": acc_val.get("phone", "Н/Д"),
+                "experience_year": acc_val.get("experience_year", 1)
             }
+            conducted_lifetime = str(acc_val.get("conducted", 0))
+            cancelled_lifetime = str(acc_val.get("cancelled", 0))
             break
             
     tg_part = ""
@@ -880,7 +884,7 @@ def generate_osint_dossier(target_first_name, target_last_name):
     return (
         f"👤 *ДОСЬЕ: {target_first_name} {target_last_name}*\n\n"
         f"{tg_part}"
-        f"📊 *ОСНОВНАЯ СТАТИСТИКА:*\n"
+        f"📊 *ОСНОВНАЯ СТАТИСТИКА ЗА МЕСЯЦ:*\n"
         f"  ├ Всего записей: *{total_booked}*\n"
         f"  ├ Посещено смен: *{attended_count}* (👑 Главарь: {leader_count} | 🏃 Игрок: {player_count})\n"
         f"  ├ Пропущено смен: *{skipped_count}*\n"
@@ -889,7 +893,10 @@ def generate_osint_dossier(target_first_name, target_last_name):
         f"  ├ Среднее время смены: *{avg_shift_len}* мин\n"
         f"  ├ Процент посещаемости: *{attendance_rate}%*\n"
         f"  └ Процент опозданий: *{late_rate}%*\n\n"
-        f"💰 *ФИНАНСОВЫЙ ОТЧЕТ:*\n"
+        f"💼 *СТАТИСТИКА ЗА ВСЁ ВРЕМЯ (с сайта):*\n"
+        f"  ├ Проведено смен: *{conducted_lifetime}*\n"
+        f"  └ Отмен смен: *{cancelled_lifetime}*\n\n"
+        f"💰 *ФИНАНСОВЫЙ ОТЧЕТ ЗА МЕСЯЦ:*\n"
         f"  ├ Всего начислено: *{total_earned}* ₽\n"
         f"  ├ Из них за Главаря: *{earned_leader}* ₽\n"
         f"  ├ Из них за Игрока: *{earned_player}* ₽\n"
@@ -1466,23 +1473,18 @@ async def handle_user_profile(callback: CallbackQuery):
     lates = 0
     player_lates = 0
     total_hours = 0.0
+    total_cached_completed = 0
+    already_earned = 0
     stats = None
     if GLOBAL_CACHED_DATA:
         stats = get_user_stats(site_name, GLOBAL_CACHED_DATA)
         lates = stats["lates"]
         player_lates = stats["player_lates"]
         total_hours = stats["total_hours"]
-
-    site_extra = f"\n📊 Проведено: <b>{conducted}</b> | Отмен: <b>{cancelled}</b> | ⏰ Опозданий: <b>{lates}</b> | ⏳ Часов: <b>{total_hours}</b>"
-
-    already_earned = conducted * PAYOUT_PLAYER
-    if stats:
         cached_leader = stats["completed_leader"]
         cached_player = stats["completed_player"]
         total_cached_completed = cached_leader + cached_player
-        cached_earned = cached_leader * PAYOUT_LEADER + (cached_player - player_lates) * PAYOUT_PLAYER + player_lates * 400
-        outside_shifts = max(0, conducted - total_cached_completed)
-        already_earned = cached_earned + outside_shifts * PAYOUT_PLAYER
+        already_earned = cached_leader * PAYOUT_LEADER + (cached_player - player_lates) * PAYOUT_PLAYER + player_lates * 400
 
     expected_earnings = 0
     if GLOBAL_CACHED_DATA:
@@ -1539,11 +1541,16 @@ async def handle_user_profile(callback: CallbackQuery):
         f"💬 Telegram: <b>{safe_tg_name}</b> ({safe_tg_username})\n"
         f"🆔 Telegram ID: <code>{tg_id}</code>\n"
         f"📞 Телефон: <code>{phone_fmt}</code>\n"
-        f"🎓 Год обучения: <b>{year_str}</b>"
-        f"{site_extra}\n\n"
-        f"💰 Уже заработано: <b>{already_earned}</b> ₽\n"
-        f"⏳ В ожидании: <b>{expected_earnings}</b> ₽\n"
-        f"🔥 Всего за месяц: <b>{total_for_month}</b> ₽\n"
+        f"🎓 Год обучения: <b>{year_str}</b>\n"
+        f"📊 Проведено (за всё время): <b>{conducted}</b> | Отмен: <b>{cancelled}</b>\n\n"
+        f"📅 <b>СТАТИСТИКА ЗА МЕСЯЦ:</b>\n"
+        f"  • Проведено смен: <b>{total_cached_completed}</b>\n"
+        f"  • Опозданий: <b>{lates}</b>\n"
+        f"  • Отработано времени: <b>{total_hours}</b> ч.\n\n"
+        f"💰 <b>ФИНАНСЫ ЗА МЕСЯЦ:</b>\n"
+        f"  • Уже заработано: <b>{already_earned}</b> ₽\n"
+        f"  • В ожидании: <b>{expected_earnings}</b> ₽\n"
+        f"  • Всего за месяц: <b>{total_for_month}</b> ₽\n"
         f"{library_str}"
     )
     now = datetime.now()
