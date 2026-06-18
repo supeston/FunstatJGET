@@ -69,6 +69,14 @@ TEMP_AUTO_BOOKINGS = {}
 OSINT_SEARCH_RESULTS = {}
 
 GLOBAL_CACHED_DATA = None
+
+VIP_NAMES = ["макар", "радэль", "радель", "ярик", "карим"]
+
+def is_vip(site_name: str) -> bool:
+    if not site_name:
+        return False
+    return any(vip in site_name.lower() for vip in VIP_NAMES)
+
 router = Router()
 
 async def edit_or_send(bot: Bot, chat_id: int, text: str, reply_markup=None, parse_mode="Markdown", disable_web_page_preview=True):
@@ -610,6 +618,10 @@ def get_user_stats(site_name, events_list):
     total_minutes = 0
     history = []
     
+    school_mins = {}
+    category_mins = {}
+    station_mins = {}
+    
     for event in events_list:
         raw_cat = event.get("event_type_name", "")
         school = format_school_name(event.get("title", ""))
@@ -666,18 +678,31 @@ def get_user_stats(site_name, events_list):
                     if not as_leader:
                         player_lates += 1
                         
+                school_mins[school] = school_mins.get(school, 0) + total_work_mins
+                clean_cat = clean_category_name(raw_cat)
+                category_mins[clean_cat] = category_mins.get(clean_cat, 0) + total_work_mins
+                station_mins[role] = station_mins.get(role, 0) + total_work_mins
+                        
         hist_item = f"• {date_str} | {clean_category_name(raw_cat)} — *{role}* ({school})"
         if is_completed and attended and late:
             hist_item += " ⚠️ (Опоздание)"
         history.append(hist_item)
         
     history = sorted(history)
+    
+    school_hours = {k: round(v / 60, 1) for k, v in sorted(school_mins.items(), key=lambda item: item[1], reverse=True)}
+    category_hours = {k: round(v / 60, 1) for k, v in sorted(category_mins.items(), key=lambda item: item[1], reverse=True)}
+    station_hours = {k: round(v / 60, 1) for k, v in sorted(station_mins.items(), key=lambda item: item[1], reverse=True)}
+    
     return {
         "completed_player": completed_player,
         "completed_leader": completed_leader,
         "lates": lates,
         "player_lates": player_lates,
         "total_hours": round(total_minutes / 60, 1),
+        "school_hours": school_hours,
+        "category_hours": category_hours,
+        "station_hours": station_hours,
         "history": history
     }
 
@@ -797,13 +822,13 @@ def generate_osint_dossier(target_first_name, target_last_name):
     avg_hourly_pay = round(total_earned / (total_minutes / 60), 1) if total_minutes > 0 else 0.0
     
     top_schools = sorted(school_counts.items(), key=lambda x: x[1], reverse=True)[:3]
-    top_schools_str = ", ".join([f"{sch} ({cnt})" for sch, cnt in top_schools]) if top_schools else "Нет сведений"
+    top_schools_str = "\n".join([f"  • {sch}: {round(mins/60, 1)} ч." for sch, mins in top_schools]) if top_schools else "  _Нет сведений_"
     
     top_cats = sorted(category_counts.items(), key=lambda x: x[1], reverse=True)[:3]
-    top_cats_str = ", ".join([f"{cat} ({cnt})" for cat, cnt in top_cats]) if top_cats else "Нет сведений"
+    top_cats_str = "\n".join([f"  • {cat}: {round(mins/60, 1)} ч." for cat, mins in top_cats]) if top_cats else "  _Нет сведений_"
     
     top_stations = sorted(station_counts.items(), key=lambda x: x[1], reverse=True)[:3]
-    top_stations_str = ", ".join([f"{role} ({cnt})" for role, cnt in top_stations]) if top_stations else "Нет сведений"
+    top_stations_str = "\n".join([f"  • {role}: {round(mins/60, 1)} ч." for role, mins in top_stations]) if top_stations else "  _Нет сведений_"
     
     upcoming_shifts = sorted(upcoming_shifts, key=lambda x: x["date"])
     past_shifts = sorted(past_shifts, key=lambda x: x["date"], reverse=True)
@@ -870,10 +895,9 @@ def generate_osint_dossier(target_first_name, target_last_name):
         f"  ├ Из них за Игрока: *{earned_player}* ₽\n"
         f"  ├ Вычеты за опоздания: *{late_penalties}* ₽\n"
         f"  └ Средняя ставка: *{avg_hourly_pay}* ₽/час\n\n"
-        f"🎯 *ПРЕДПОЧТЕНИЯ:*\n"
-        f"  ├ Любимые локации: _{top_schools_str}_\n"
-        f"  ├ Любимые квесты: _{top_cats_str}_\n"
-        f"  └ Любимые роли/позиции: _{top_stations_str}_\n\n"
+        f"📚 *БИБЛИОТЕКА ЛОКАЦИЙ (Школы):*\n{top_schools_str}\n\n"
+        f"📚 *БИБЛИОТЕКА КВЕСТОВ:*\n{top_cats_str}\n\n"
+        f"📚 *БИБЛИОТЕКА СТАНЦИЙ:*\n{top_stations_str}\n\n"
         f"⏱️ *БЛИЖАЙШИЕ СМЕНЫ:*\n"
         f"{upcoming_str}\n\n"
         f"📜 *ИСТОРИЯ ПОСЛЕДНИХ СМЕН (до 5):*\n"
@@ -1185,9 +1209,11 @@ async def background_weekday_autobooking_loop(bot: Bot):
 def get_main_menu(chat_id=None):
     builder = InlineKeyboardBuilder()
     if chat_id and is_linked(chat_id):
-        builder.row(
-            InlineKeyboardButton(text="🤖 Автозапись", callback_data="auto_booking_menu")
-        )
+        acc = get_linked_account(chat_id)
+        if acc and is_vip(acc.get("name", "")):
+            builder.row(
+                InlineKeyboardButton(text="🤖 Автозапись", callback_data="auto_booking_menu")
+            )
     if chat_id and chat_id == ADMIN_ID:
         builder.row(
             InlineKeyboardButton(text="👑 Админ-панель", callback_data="admin_panel"),
@@ -1201,6 +1227,7 @@ def get_main_menu(chat_id=None):
     
     row_buttons.append(InlineKeyboardButton(text="📚 Гайды", callback_data="guides_menu"))
     builder.row(*row_buttons)
+    builder.row(InlineKeyboardButton(text="🏆 Топы", callback_data="tops_menu_select"))
     return builder.as_markup()
 
 def get_back_btn(target="main_menu"):
@@ -1485,6 +1512,23 @@ async def handle_user_profile(callback: CallbackQuery):
     exp_year = acc.get("experience_year", 1)
     year_str = "Первый год (первогодник, 12:00)" if exp_year == 1 else "Второй год (второгодник, 10:00)"
 
+    library_str = ""
+    if stats:
+        top_sch = list(stats["school_hours"].items())[:3]
+        top_cats = list(stats["category_hours"].items())[:3]
+        top_sts = list(stats["station_hours"].items())[:3]
+        
+        sch_str = "\n".join([f"  • {k}: <b>{v}</b> ч." for k, v in top_sch]) if top_sch else "  _Нет сведений_"
+        cat_str = "\n".join([f"  • {k}: <b>{v}</b> ч." for k, v in top_cats]) if top_cats else "  _Нет сведений_"
+        sts_str = "\n".join([f"  • {k}: <b>{v}</b> ч." for k, v in top_sts]) if top_sts else "  _Нет сведений_"
+        
+        library_str = (
+            f"\n<blockquote expandable>📚 <b>МОИ БИБЛИОТЕКИ ЧАСОВ:</b>\n\n"
+            f"🏫 <b>Школы:</b>\n{sch_str}\n\n"
+            f"🎭 <b>Квесты:</b>\n{cat_str}\n\n"
+            f"🎯 <b>Станции:</b>\n{sts_str}</blockquote>"
+        )
+
     text = (
         f"👤 <b>ПРОФИЛЬ</b>\n\n"
         f"📛 Имя на сайте: <b>{safe_site_name}</b>\n"
@@ -1495,7 +1539,8 @@ async def handle_user_profile(callback: CallbackQuery):
         f"{site_extra}\n\n"
         f"💰 Уже заработано: <b>{already_earned}</b> ₽\n"
         f"⏳ В ожидании: <b>{expected_earnings}</b> ₽\n"
-        f"🔥 Всего за месяц: <b>{total_for_month}</b> ₽\n\n"
+        f"🔥 Всего за месяц: <b>{total_for_month}</b> ₽\n"
+        f"{library_str}\n"
         f"<blockquote expandable>⚠️ <b>ВАЖНО:</b> Вы должны строго выбрать свой <b>реальный</b> статус! "
         f"Если вы выберете второй год будучи первогодником, бот попытается записать вас в 10:00 и получит ошибку сайта. "
         f"Если вы выберете первый год будучи второгодником, бот начнет запись только в 12:00, "
@@ -1674,6 +1719,27 @@ async def handle_today_plan(callback: CallbackQuery):
                         role_str = f"Станция: {st_num}" if st_num else "Ведущий"
                         role_display = f"Станция: *{st_num}* | Ведущий: {leader_name}" if st_num else f"*Ведущий* ({leader_name})"
                         icon = "⭐"
+                    
+                    friends = ""
+                    if is_vip(site_name):
+                        friend_list = []
+                        for participant in event.get("participants", []):
+                            p_fn = participant.get("first_name", "")
+                            p_ln = participant.get("last_name", "")
+                            p_full = f"{p_fn} {p_ln}".strip()
+                            if p_full.lower() != site_name.strip().lower() and is_vip(p_full):
+                                p_as_leader = participant.get("as_leader")
+                                if p_as_leader:
+                                    p_role = "Главарь"
+                                else:
+                                    p_st_obj = participant.get("station")
+                                    p_st_name = p_st_obj.get("name") if isinstance(p_st_obj, dict) else ""
+                                    p_st_num = get_station_num(p_st_name)
+                                    p_role = f"Станция {p_st_num}" if p_st_num else "Ведущий"
+                                friend_list.append(f"{p_fn} ({p_role})")
+                        if friend_list:
+                            friends = "\n  🤝 Свои на смене: *" + ", ".join(friend_list) + "*"
+
                     target_shifts.append({
                         "school": school_name,
                         "geo": geo_query,
@@ -1685,7 +1751,8 @@ async def handle_today_plan(callback: CallbackQuery):
                         "category": category,
                         "raw_cat": raw_cat,
                         "payout": payout,
-                        "leader_name": leader_name
+                        "leader_name": leader_name,
+                        "friends": friends
                     })
     if not target_shifts:
         if is_today:
@@ -1746,11 +1813,12 @@ async def handle_today_plan(callback: CallbackQuery):
                     leader_info = "" if s['role'] == "Главарь" else f" (Ведущий: {s['leader_name']})"
                     role_lines.append(f"  {connector}⏰ *{s['start_time'][:5]} - {s['end_time'][:5]}* — {s['icon']} *{s['role']}*{leader_info}")
                 role_str = "\n".join(role_lines)
+            friends_out = "".join(dict.fromkeys(s.get("friends", "") for s in block if s.get("friends", "")))
             block_fmt = (
                 f"{num_prefix} **[{school}]({geo})**\n"
                 f"🎯 Квест: {format_category_link(block[0]['raw_cat'])}\n"
                 f"{time_str}\n"
-                f"{role_str}"
+                f"{role_str}{friends_out}"
             )
             blocks_text.append(block_fmt)
         blocks_joined = "\n\n".join(blocks_text)
@@ -2249,6 +2317,10 @@ async def handle_auto_booking_menu(callback: CallbackQuery):
     cid = callback.message.chat.id
     if not is_linked(cid):
         await callback.answer("🔒 Пожалуйста, сначала привяжите аккаунт", show_alert=True)
+        return
+    acc = get_linked_account(cid)
+    if not acc or not is_vip(acc.get("name", "")):
+        await callback.answer("🚫 У вас нет доступа к функции Автозаписи.", show_alert=True)
         return
     try: await callback.answer()
     except Exception: pass
@@ -3167,6 +3239,190 @@ async def handle_admin_panel(callback: CallbackQuery):
     builder.row(InlineKeyboardButton(text="↩️ Главное меню", callback_data="main_menu"))
     await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=builder.as_markup())
 
+def format_name_for_top(first_name, last_name, is_admin):
+    first_name = first_name.strip()
+    last_name = last_name.strip()
+    if is_admin:
+        return f"{first_name} {last_name}".strip()
+    else:
+        last_initial = f"{last_name[0]}." if last_name else ""
+        return f"{first_name} {last_initial}".strip()
+
+def calculate_tops(is_admin):
+    tops = {
+        "hours": {"title": "⏳ Топ по часам", "data": {}},
+        "leaders": {"title": "👑 Топ Главарей", "data": {}},
+        "players": {"title": "🏃 Топ Игроков", "data": {}},
+        "lates": {"title": "⏰ Топ Опозданий", "data": {}},
+        "druzhba": {"title": "🤝 Топ Дружбы", "data": {}},
+        "pdd": {"title": "🚗 Топ ПДД", "data": {}},
+        "adymnar": {"title": "🏫 Топ Адымнара", "data": {}}
+    }
+    
+    if not GLOBAL_CACHED_DATA:
+        return tops
+        
+    for event in GLOBAL_CACHED_DATA:
+        title = event.get("title", "")
+        school_name = format_school_name(title)
+        raw_cat = event.get("event_type_name", "")
+        cat = clean_category_name(normalize_category(raw_cat, title))
+        
+        quest_mins = 65
+        try:
+            ts = datetime.strptime(event.get("start_time")[:8], "%H:%M:%S")
+            te = datetime.strptime(event.get("end_time")[:8], "%H:%M:%S")
+            diff_mins = (te - ts).total_seconds() / 60
+            if diff_mins > 0:
+                quest_mins = diff_mins
+        except Exception:
+            pass
+        total_work_mins = quest_mins + 40
+        
+        for p in event.get("participants", []):
+            if not p.get("attended", True):
+                continue
+            
+            fn = p.get("first_name", "")
+            ln = p.get("last_name", "")
+            if not fn and not ln:
+                continue
+                
+            uid = f"{fn.lower()}_{ln.lower()}"
+            name_fmt = format_name_for_top(fn, ln, is_admin)
+            
+            late = p.get("late", False)
+            as_leader = p.get("as_leader", False)
+            
+            if uid not in tops["hours"]["data"]:
+                for key in tops:
+                    tops[key]["data"][uid] = {"name": name_fmt, "val": 0}
+            
+            tops["hours"]["data"][uid]["val"] += total_work_mins
+            
+            if as_leader:
+                tops["leaders"]["data"][uid]["val"] += 1
+            else:
+                tops["players"]["data"][uid]["val"] += 1
+                
+            if late:
+                tops["lates"]["data"][uid]["val"] += 1
+                
+            if cat == "Дружба":
+                tops["druzhba"]["data"][uid]["val"] += 1
+            elif cat == "ПДД":
+                tops["pdd"]["data"][uid]["val"] += 1
+                
+            if "Адымнар" in school_name:
+                tops["adymnar"]["data"][uid]["val"] += 1
+                
+    for key in tops:
+        raw_list = list(tops[key]["data"].values())
+        if key == "hours":
+            for r in raw_list:
+                r["val"] = round(r["val"] / 60, 1)
+        raw_list = [r for r in raw_list if r["val"] > 0]
+        raw_list.sort(key=lambda x: x["val"], reverse=True)
+        tops[key]["sorted"] = raw_list
+        
+    return tops
+
+def get_tops_menu(top_id, page, tops_data):
+    top_info = tops_data.get(top_id)
+    if not top_info:
+        return None, None
+        
+    items_per_page = 15
+    sorted_data = top_info["sorted"]
+    total_items = len(sorted_data)
+    total_pages = (total_items + items_per_page - 1) // items_per_page
+    if total_pages == 0:
+        total_pages = 1
+        
+    if page < 1:
+        page = 1
+    elif page > total_pages:
+        page = total_pages
+        
+    start_idx = (page - 1) * items_per_page
+    end_idx = start_idx + items_per_page
+    page_data = sorted_data[start_idx:end_idx]
+    
+    text = f"🏆 <b>{top_info['title']}</b>\n\n"
+    if not page_data:
+        text += "<i>Пока нет данных...</i>\n"
+    else:
+        for i, item in enumerate(page_data, start=start_idx + 1):
+            val = item["val"]
+            if top_id == "hours":
+                val_str = f"{val} ч."
+            elif top_id == "lates":
+                val_str = f"{val} раз(а)"
+            else:
+                val_str = f"{val} смен"
+            medal = "🥇" if i == 1 else "🥈" if i == 2 else "🥉" if i == 3 else "🎗"
+            text += f"{medal} <b>{i}.</b> {item['name']} — {val_str}\n"
+            
+    builder = InlineKeyboardBuilder()
+    
+    nav_buttons = []
+    if page > 1:
+        nav_buttons.append(InlineKeyboardButton(text="⬅️", callback_data=f"tops_nav_{top_id}_{page-1}"))
+    else:
+        nav_buttons.append(InlineKeyboardButton(text="⏹", callback_data="ignore"))
+        
+    nav_buttons.append(InlineKeyboardButton(text=f"Стр. {page}/{total_pages}", callback_data="ignore"))
+    
+    if page < total_pages:
+        nav_buttons.append(InlineKeyboardButton(text="➡️", callback_data=f"tops_nav_{top_id}_{page+1}"))
+    else:
+        nav_buttons.append(InlineKeyboardButton(text="⏹", callback_data="ignore"))
+        
+    builder.row(*nav_buttons)
+    builder.row(InlineKeyboardButton(text=f"📜 Выбрать топ ({top_info['title']})", callback_data="tops_menu_select"))
+    builder.row(InlineKeyboardButton(text="↩️ Главное меню", callback_data="main_menu"))
+    
+    return text, builder.as_markup()
+
+@router.callback_query(F.data == "ignore")
+async def handle_ignore(callback: CallbackQuery):
+    await callback.answer()
+
+@router.callback_query(F.data == "tops_menu_select")
+async def handle_tops_menu_select(callback: CallbackQuery):
+    builder = InlineKeyboardBuilder()
+    builder.row(InlineKeyboardButton(text="⏳ Топ по часам", callback_data="tops_nav_hours_1"))
+    builder.row(InlineKeyboardButton(text="👑 Топ Главарей", callback_data="tops_nav_leaders_1"))
+    builder.row(InlineKeyboardButton(text="🏃 Топ Игроков", callback_data="tops_nav_players_1"))
+    builder.row(InlineKeyboardButton(text="⏰ Топ Опозданий", callback_data="tops_nav_lates_1"))
+    builder.row(InlineKeyboardButton(text="🤝 Топ Дружбы", callback_data="tops_nav_druzhba_1"))
+    builder.row(InlineKeyboardButton(text="🚗 Топ ПДД", callback_data="tops_nav_pdd_1"))
+    builder.row(InlineKeyboardButton(text="🏫 Топ Адымнара", callback_data="tops_nav_adymnar_1"))
+    builder.row(InlineKeyboardButton(text="↩️ Главное меню", callback_data="main_menu"))
+    await callback.message.edit_text("🏆 Выбери категорию топа:", reply_markup=builder.as_markup())
+
+@router.callback_query(F.data.startswith("tops_nav_"))
+async def handle_tops_nav(callback: CallbackQuery):
+    parts = callback.data.split("_")
+    if len(parts) >= 4:
+        top_id = parts[2]
+        try:
+            page = int(parts[3])
+        except ValueError:
+            page = 1
+            
+        cid = callback.message.chat.id
+        is_admin = (cid == ADMIN_ID)
+        
+        await callback.answer()
+        
+        tops_data = calculate_tops(is_admin)
+        text, markup = get_tops_menu(top_id, page, tops_data)
+        if text:
+            try:
+                await callback.message.edit_text(text, parse_mode="HTML", reply_markup=markup)
+            except Exception as e:
+                pass
 
 async def main():
     global GLOBAL_CACHED_DATA
