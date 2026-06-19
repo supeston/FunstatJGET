@@ -763,6 +763,7 @@ def generate_osint_dossier(target_first_name, target_last_name):
     target_fn_lower = target_first_name.strip().lower()
     target_ln_lower = target_last_name.strip().lower()
     
+    phone_val = None
     if PERSISTENT_EVENTS:
         for event in PERSISTENT_EVENTS.values():
             user_p = None
@@ -771,6 +772,8 @@ def generate_osint_dossier(target_first_name, target_last_name):
                 p_ln = p.get("last_name", "").strip().lower()
                 if p_fn == target_fn_lower and p_ln == target_ln_lower:
                     user_p = p
+                    if not phone_val and p.get("phone"):
+                        phone_val = p.get("phone")
                     break
             if not user_p:
                 continue
@@ -876,6 +879,8 @@ def generate_osint_dossier(target_first_name, target_last_name):
                 "phone": acc_val.get("phone", "Н/Д"),
                 "experience_year": acc_val.get("experience_year", 1)
             }
+            if linked_tg_info["phone"] and linked_tg_info["phone"] != "Н/Д":
+                phone_val = linked_tg_info["phone"]
             try:
                 conducted_lifetime = int(acc_val.get("conducted", 0))
             except Exception:
@@ -886,6 +891,54 @@ def generate_osint_dossier(target_first_name, target_last_name):
                 cancelled_lifetime = None
             break
             
+    if not phone_val:
+        try:
+            for fname in os.listdir("."):
+                if fname.startswith("db_dump_") and fname.endswith(".json"):
+                    with open(fname, "r", encoding="utf-8") as f:
+                        dump_data = json.load(f)
+                    found = False
+                    for u in dump_data.get("users", []):
+                        u_fn = u.get("first_name", "").strip().lower()
+                        u_ln = u.get("last_name", "").strip().lower()
+                        if u_fn == target_fn_lower and u_ln == target_ln_lower:
+                            p_raw = u.get("phone")
+                            if p_raw:
+                                phone_val = p_raw
+                                found = True
+                                break
+                    if found:
+                        break
+                    for ev in dump_data.get("raw_events", []):
+                        for p in ev.get("participants", []):
+                            p_fn = p.get("first_name", "").strip().lower()
+                            p_ln = p.get("last_name", "").strip().lower()
+                            if p_fn == target_fn_lower and p_ln == target_ln_lower:
+                                p_raw = p.get("phone")
+                                if p_raw:
+                                    phone_val = p_raw
+                                    found = True
+                                    break
+                        if found:
+                            break
+                    if found:
+                        break
+        except Exception as e:
+            print(f"Error searching phone in db dumps: {e}")
+
+    phone_line = ""
+    if phone_val:
+        phone_digits = re.sub(r'\D', '', str(phone_val).strip())
+        if len(phone_digits) == 10:
+            phone_digits = '7' + phone_digits
+        if len(phone_digits) == 11 and phone_digits.startswith('8'):
+            phone_digits = '7' + phone_digits[1:]
+        if len(phone_digits) == 11 and phone_digits.startswith('7'):
+            pretty_phone = f"+7 ({phone_digits[1:4]}) {phone_digits[4:7]}-{phone_digits[7:9]}-{phone_digits[9:11]}"
+        else:
+            pretty_phone = phone_val
+        phone_line = f"📱 *Телефон:* `{pretty_phone}`"
+
     if linked_tg_info:
         phone_raw = linked_tg_info["phone"]
         if len(phone_raw) == 11 and phone_raw.startswith("7"):
@@ -949,8 +1002,14 @@ def generate_osint_dossier(target_first_name, target_last_name):
         past_lines.append(f"  • {s['date']} | {s['start_time']} — {s['category']} ({s['role']}){attn_str}{late_symbol}")
     past_str = "\n".join(past_lines) if past_lines else "  _История смен пуста_"
 
+    dossier_header = f"👤 *ДОСЬЕ: {target_first_name} {target_last_name}*\n"
+    if phone_line:
+        dossier_header += f"{phone_line}\n"
+    else:
+        dossier_header += "\n"
+
     return (
-        f"👤 *ДОСЬЕ: {target_first_name} {target_last_name}*\n\n"
+        f"{dossier_header}"
         f"{tg_part}"
         f"📊 *Статистика:*\n"
         f"  ├ Смен: *{total_completed}* (отмен: *{cancelled_val}*)\n"
@@ -1005,6 +1064,7 @@ def clean_event_for_cache(event):
             "as_leader": p.get("as_leader"),
             "attended": p.get("attended", True),
             "late": p.get("late", False),
+            "phone": p.get("phone"),
         }
         st = p.get("station")
         if isinstance(st, dict):
@@ -1025,7 +1085,58 @@ def clean_event_for_cache(event):
     
     return cleaned
 
+def load_token_from_auth():
+    if not os.path.exists(AUTH_FILE):
+        return None
+    try:
+        with open(AUTH_FILE, 'r', encoding='utf-8') as f:
+            auth_data = json.load(f)
+        if isinstance(auth_data, dict) and "origins" in auth_data:
+            for origin in auth_data["origins"]:
+                if "localStorage" in origin:
+                    for item in origin["localStorage"]:
+                        if item.get("name") == "token":
+                            return item.get("value")
+        return None
+    except Exception:
+        return None
+
 async def fetch_all_data():
+    token = load_token_from_auth()
+    if not token:
+        try:
+            accounts = load_linked_accounts()
+            for acc in accounts.values():
+                if acc.get("token"):
+                    token = acc.get("token")
+                    break
+        except Exception:
+            pass
+
+    if token:
+        headers = {
+            "User-Agent": "Mozilla/5.0",
+            "Accept": "application/json",
+            "Authorization": f"Token {token}"
+        }
+        async with aiohttp.ClientSession(headers=headers) as session:
+            try:
+                async with session.get(URL_CURRENT, params={"tab": "current"}, timeout=10) as r1:
+                    if r1.status != 200:
+                        return None, f"Ошибка API с токеном (current): статус {r1.status}"
+                    res1 = await r1.json()
+                async with session.get(URL_NEXT, params={"tab": "next"}, timeout=10) as r2:
+                    if r2.status != 200:
+                        return None, f"Ошибка API с токеном (next): статус {r2.status}"
+                    res2 = await r2.json()
+                
+                merged = {e["id"]: e for e in (res1 + res2)}.values()
+                cleaned = [clean_event_for_cache(e) for e in merged]
+                gc.collect()
+                return cleaned, None
+            except Exception as e:
+                print(f"[{datetime.now().strftime('%H:%M:%S')}] Ошибка запроса с токеном ({e}), пробуем куки...")
+    
     cookies = load_cookies_from_auth()
     if not cookies:
         return None, "Файл auth.json отсутствует или поврежден."
