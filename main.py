@@ -113,6 +113,8 @@ def merge_into_persistent(new_events):
         save_persistent_events()
 
 router = Router()
+router.message.filter(F.chat.type == "private")
+router.callback_query.filter(F.message.chat.type == "private")
 
 async def edit_or_send(bot: Bot, chat_id: int, text: str, reply_markup=None, parse_mode="Markdown", disable_web_page_preview=True):
     msg_id = BOT_MESSAGE_ID.get(chat_id)
