@@ -69,6 +69,8 @@ TEMP_AUTO_BOOKINGS = {}
 OSINT_SEARCH_RESULTS = {}
 
 GLOBAL_CACHED_DATA = None
+GLOBAL_CACHED_TOPS_ADMIN = None
+GLOBAL_CACHED_TOPS_USER = None
 PERSISTENT_EVENTS_FILE = "persistent_events.json"
 PERSISTENT_EVENTS = {}
 
@@ -1110,12 +1112,17 @@ async def api_get_profile(token):
 
 
 async def background_cache_updater():
-    global GLOBAL_CACHED_DATA
+    global GLOBAL_CACHED_DATA, GLOBAL_CACHED_TOPS_ADMIN, GLOBAL_CACHED_TOPS_USER
     while True:
         data, err = await fetch_all_data()
         if not err and data:
             GLOBAL_CACHED_DATA = data
             merge_into_persistent(data)
+            try:
+                GLOBAL_CACHED_TOPS_ADMIN = calculate_tops(is_admin=True)
+                GLOBAL_CACHED_TOPS_USER = calculate_tops(is_admin=False)
+            except Exception as e:
+                print(f"[{datetime.now().strftime('%H:%M:%S')}] Ошибка кэширования топов: {e}")
             print(f"[{datetime.now().strftime('%H:%M:%S')}] Глобальный кэш успешно обновлен.")
         else:
             print(f"[{datetime.now().strftime('%H:%M:%S')}] Ошибка фонового обновления: {err}")
@@ -3637,7 +3644,9 @@ async def handle_tops_nav(callback: CallbackQuery):
         
         await callback.answer()
         
-        tops_data = calculate_tops(is_admin)
+        tops_data = GLOBAL_CACHED_TOPS_ADMIN if is_admin else GLOBAL_CACHED_TOPS_USER
+        if not tops_data:
+            tops_data = calculate_tops(is_admin)
         text, markup = get_tops_menu(top_index, tops_data)
         if text:
             try:
@@ -3646,7 +3655,7 @@ async def handle_tops_nav(callback: CallbackQuery):
                 pass
 
 async def main():
-    global GLOBAL_CACHED_DATA
+    global GLOBAL_CACHED_DATA, GLOBAL_CACHED_TOPS_ADMIN, GLOBAL_CACHED_TOPS_USER
     load_persistent_events()
     bot = Bot(token=BOT_TOKEN)
     dp = Dispatcher()
@@ -3656,6 +3665,11 @@ async def main():
     if not err and data:
         GLOBAL_CACHED_DATA = data
         merge_into_persistent(data)
+        try:
+            GLOBAL_CACHED_TOPS_ADMIN = calculate_tops(is_admin=True)
+            GLOBAL_CACHED_TOPS_USER = calculate_tops(is_admin=False)
+        except Exception as e:
+            pass
         print("[+] Кэш инициализирован. Запуск...")
     else:
         print("[!] Запуск с пустым кэшем.")
