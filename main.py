@@ -1,18 +1,6 @@
 import os
 import sys
 import subprocess
-
-if os.environ.get("PYTHON_UPDATED") != "true":
-    print("[CD-Система] Проверка обновлений на GitHub...")
-    try:
-        subprocess.run(["git", "fetch", "origin", "main"], check=True)
-        subprocess.run(["git", "reset", "--hard", "origin/main"], check=True)
-        print("[CD-Система] Код успешно обновлен до последней версии!")
-        os.environ["PYTHON_UPDATED"] = "true"
-        os.execv(sys.executable, [sys.executable] + sys.argv)
-    except Exception as e:
-        print(f"[CD-Система] Ошибка автоапдейта (запуск текущей версии): {e}")
-
 import re
 import json
 import random
@@ -29,7 +17,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 load_dotenv()
 
-BOT_TOKEN = os.getenv("BOT_TOKEN")
+BOT_TOKEN = "8745318319:AAFDe2sKovxa3jZe7F6agJed9Eo6R1dyRto"
 BOT_VERSION = "1.2.0.6"
 AUTH_FILE = "auth.json"
 LINKED_FILE = "linked_accounts.json"
@@ -884,7 +872,6 @@ def generate_osint_dossier(target_first_name, target_last_name):
                 cancelled_lifetime = None
             break
             
-    tg_part = ""
     if linked_tg_info:
         phone_raw = linked_tg_info["phone"]
         if len(phone_raw) == 11 and phone_raw.startswith("7"):
@@ -892,15 +879,15 @@ def generate_osint_dossier(target_first_name, target_last_name):
         else:
             pretty_phone = phone_raw
         year_val = linked_tg_info["experience_year"]
-        year_str = "Второй (второгодник, 10:00)" if year_val == 2 else "Первый (первогодник, 12:00)"
+        year_str = "2-й (10:00)" if year_val == 2 else "1-й (12:00)"
         tg_part = (
-            f"🔗 *СВЯЗАННЫЙ TELEGRAM-АККАУНТ:*\n"
-            f"  ├ 🆔 Telegram ID: `{linked_tg_info['chat_id']}`\n"
-            f"  ├ 🎓 Год обучения: *{year_str}*\n"
-            f"  └ 📞 Телефон: `{pretty_phone}`\n\n"
+            f"🔗 *Telegram:*\n"
+            f"  ├ ID: `{linked_tg_info['chat_id']}`\n"
+            f"  ├ Год: *{year_str}*\n"
+            f"  └ Тел: `{pretty_phone}`\n\n"
         )
     else:
-        tg_part = "⚠️ *Telegram-аккаунт не привязан к боту*\n\n"
+        tg_part = "⚠️ *Telegram не привязан*\n\n"
 
     total_completed = max(conducted_lifetime or 0, attended_count)
     uncached_completed = max(0, total_completed - attended_count)
@@ -951,23 +938,22 @@ def generate_osint_dossier(target_first_name, target_last_name):
     return (
         f"👤 *ДОСЬЕ: {target_first_name} {target_last_name}*\n\n"
         f"{tg_part}"
-        f"📊 *ОБЩАЯ СТАТИСТИКА:*\n"
-        f"  ├ Проведено смен: *{total_completed}*\n"
-        f"  ├ Отменено смен: *{cancelled_val}*\n"
-        f"  ├ Количество опозданий: *{late_count}*\n"
-        f"  ├ Отработано времени: *{total_hours_adjusted}* ч\n"
-        f"  ├ Среднее время смены: *{avg_shift_len}* мин\n"
-        f"  └ Процент посещаемости: *{attendance_rate}%*\n\n"
-        f"💰 *ФИНАНСОВЫЙ ОТЧЕТ:*\n"
-        f"  ├ Уже заработано: *{already_earned}* ₽\n"
-        f"  ├ В ожидании: *{expected_earnings}* ₽\n"
-        f"  └ Всего заработано: *{total_earned_overall}* ₽\n\n"
-        f"📚 *БИБЛИОТЕКА ЛОКАЦИЙ (Школы):*\n{top_schools_str}\n\n"
-        f"📚 *БИБЛИОТЕКА КВЕСТОВ:*\n{top_cats_str}\n\n"
-        f"📚 *БИБЛИОТЕКА СТАНЦИЙ:*\n{top_stations_str}\n\n"
-        f"⏱️ *БЛИЖАЙШИЕ СМЕНЫ:*\n"
+        f"📊 *Статистика:*\n"
+        f"  ├ Смен: *{total_completed}* (отмен: *{cancelled_val}*)\n"
+        f"  ├ Опозданий: *{late_count}*\n"
+        f"  ├ Часов: *{total_hours_adjusted}*\n"
+        f"  ├ Ср. смена: *{avg_shift_len}* мин\n"
+        f"  └ Посещаемость: *{attendance_rate}%*\n\n"
+        f"💰 *Финансы:*\n"
+        f"  ├ Заработано: *{already_earned}* ₽\n"
+        f"  ├ Ожидается: *{expected_earnings}* ₽\n"
+        f"  └ Итого: *{total_earned_overall}* ₽\n\n"
+        f"🏫 *Топ школ:*\n{top_schools_str}\n\n"
+        f"🎭 *Топ квестов:*\n{top_cats_str}\n\n"
+        f"🎯 *Топ станций:*\n{top_stations_str}\n\n"
+        f"⏱️ *Ближайшие смены:*\n"
         f"{upcoming_str}\n\n"
-        f"📜 *ИСТОРИЯ ПОСЛЕДНИХ СМЕН (до 5):*\n"
+        f"📜 *Последние смены:*\n"
         f"{past_str}"
     )
 
@@ -1358,16 +1344,15 @@ async def cmd_start(message: Message):
     if is_linked(cid):
 
         msg = await message.answer(
-            "🛸 *Главное меню J-GET*\n\nВыбери нужный раздел:", 
+            "🛸 *J-GET*\n\nВыбери раздел:", 
             parse_mode="Markdown", reply_markup=get_main_menu(cid)
         )
         BOT_MESSAGE_ID[cid] = msg.message_id
     else:
         msg = await message.answer(
             "🛸 *Добро пожаловать в J-GET!*\n\n"
-            "Привяжите аккаунт сайта jget-events.ru чтобы получить полный доступ "
-            "к автоматической записи, учету статистики и управлению профилем.\n\n"
-            "Выберите действие:",
+            "Привяжите аккаунт jget-events.ru для доступа "
+            "к автозаписи, статистике и профилю.",
             parse_mode="Markdown", reply_markup=get_onboarding_keyboard()
         )
         BOT_MESSAGE_ID[cid] = msg.message_id
@@ -1377,14 +1362,13 @@ async def handle_link_start(callback: CallbackQuery):
     cid = callback.message.chat.id
     USER_LINK_STATE[cid] = "waiting_credentials"
     await callback.message.edit_text(
-        "🔗 *ПРИВЯЗКА АККАУНТА*\n\n"
-        "Отправьте данные от аккаунта jget-events.ru в одном сообщении:\n\n"
-        "📱 Первая строка — *номер телефона*\n"
-        "🔑 Вторая строка — *пароль*\n\n"
+        "🔗 *ПРИВЯЗКА*\n\n"
+        "Отправьте данные от jget-events.ru в одном сообщении:\n\n"
+        "📱 1-я строка — *телефон*\n"
+        "🔑 2-я строка — *пароль*\n\n"
         "Пример:\n"
         "`+79261234567`\n"
-        "`мойпароль123`\n\n"
-        "📌 _Номер можно писать в любом формате: +7, 8, или просто цифры_",
+        "`мойпароль123`",
         parse_mode="Markdown", reply_markup=get_back_btn("link_back_onboarding")
     )
 
@@ -1394,15 +1378,14 @@ async def handle_link_back_onboarding(callback: CallbackQuery):
     USER_LINK_STATE.pop(cid, None)
     if is_linked(cid):
         await callback.message.edit_text(
-            "🛸 *Главное меню J-GET*\n\nВыбери нужный раздел:", 
+            "🛸 *J-GET*\n\nВыбери раздел:", 
             parse_mode="Markdown", reply_markup=get_main_menu(cid)
         )
     else:
         await callback.message.edit_text(
             "🛸 *Добро пожаловать в J-GET!*\n\n"
-            "Привяжите аккаунт сайта jget-events.ru чтобы получить полный доступ "
-            "к автоматической записи, учету статистики и управлению профилем.\n\n"
-            "Выберите действие:",
+            "Привяжите аккаунт jget-events.ru для доступа "
+            "к автозаписи, статистике и профилю.",
             parse_mode="Markdown", reply_markup=get_onboarding_keyboard()
         )
 
@@ -1413,7 +1396,7 @@ async def handle_link_why(callback: CallbackQuery):
         "❓ *ЗАЧЕМ ПРИВЯЗЫВАТЬ АККАУНТ?*\n\n"
         "Привязка аккаунта jget-events.ru открывает полный набор функций бота:\n\n"
         "1️⃣ *Автозапись на квесты*\n"
-        " └ Автоматический перехват смен по субботам в 12:00 и ловля будних смен по гибким фильтрам школ и станций.\n\n"
+        " └ Автоматический перехват субботних смен (в 10:00/12:00 по году обучения) и ловля будних смен по гибким фильтрам школ и станций.\n\n"
         "2️⃣ *Учет зарплаты и статистики*\n"
         " └ Подсчет заработанных и ожидаемых денег за месяц, статистика смен, отмен, опозданий и отработанного времени.\n\n"
         "3️⃣ *План дня и лог смен*\n"
@@ -1447,16 +1430,15 @@ async def handle_link_confirm_yes(callback: CallbackQuery):
     USER_LINK_STATE[cid] = f"selecting_year:{name}:{phone}:{password}:{token}:{conducted}:{cancelled}"
     
     text = (
-        "🎓 *ВЫБОР ГОДА ОБУЧЕНИЯ*\n\n"
-        "На квесты вы ходите первый или второй год? От этого зависит время вашей автозаписи:\n\n"
-        "• *Первый год (первогодник):* запись проходит в *12:00* (предпроверка в 11:50).\n"
-        "• *Второй год (второгодник):* запись проходит в *10:00* (предпроверка в 09:50).\n\n"
-        "💡 _Второгодники имеют преимущество записи в 10:00 на сайте J-GET._"
+        "🎓 *ГОД ОБУЧЕНИЯ*\n\n"
+        "Вы ходите на квесты первый или второй год?\n\n"
+        "• *1-й год:* запись в *12:00*\n"
+        "• *2-й год:* запись в *10:00*"
     )
     
     builder = InlineKeyboardBuilder()
-    builder.row(InlineKeyboardButton(text="1️⃣ Первый год (12:00)", callback_data="link_year_set_1"))
-    builder.row(InlineKeyboardButton(text="2️⃣ Второй год (10:00)", callback_data="link_year_set_2"))
+    builder.row(InlineKeyboardButton(text="1️⃣ 1-й год (12:00)", callback_data="link_year_set_1"))
+    builder.row(InlineKeyboardButton(text="2️⃣ 2-й год (10:00)", callback_data="link_year_set_2"))
     
     await callback.message.edit_text(
         text,
@@ -1496,10 +1478,10 @@ async def handle_link_year_set(callback: CallbackQuery):
     USER_LINK_STATE.pop(cid, None)
     
     await callback.message.edit_text(
-        f"✅ *Аккаунт успешно привязан!*\n\n"
+        f"✅ *Аккаунт привязан!*\n\n"
         f"👤 Привет, *{name}*!\n"
-        f"Вы зарегистрированы как *{'второгодник' if selected_year == 2 else 'первогодник'}* (запись в {'10:00' if selected_year == 2 else '12:00'}).\n\n"
-        f"🛸 *Главное меню J-GET*\n\nВыбери нужный раздел:",
+        f"Статус: *{'2-й год' if selected_year == 2 else '1-й год'}* (запись в {'10:00' if selected_year == 2 else '12:00'})\n\n"
+        f"🛸 *J-GET*\n\nВыбери раздел:",
         parse_mode="Markdown", reply_markup=get_main_menu(cid)
     )
 
@@ -1508,13 +1490,10 @@ async def handle_link_confirm_no(callback: CallbackQuery):
     cid = callback.message.chat.id
     USER_LINK_STATE[cid] = "waiting_credentials"
     await callback.message.edit_text(
-        "🔗 *ПРИВЯЗКА АККАУНТА*\n\n"
-        "Похоже, это не ваш аккаунт. Попробуйте ввести данные ещё раз:\n\n"
-        "📱 Первая строка — *номер телефона*\n"
-        "🔑 Вторая строка — *пароль*\n\n"
-        "Пример:\n"
-        "`+79261234567`\n"
-        "`мойпароль123`",
+        "🔗 *ПРИВЯЗКА*\n\n"
+        "Не ваш аккаунт? Попробуйте ещё раз:\n\n"
+        "📱 1-я строка — *телефон*\n"
+        "🔑 2-я строка — *пароль*",
         parse_mode="Markdown", reply_markup=get_back_btn("link_back_onboarding")
     )
 
@@ -1617,7 +1596,7 @@ async def handle_user_profile(callback: CallbackQuery):
     total_for_month = already_earned + expected_earnings
 
     exp_year = acc.get("experience_year", 1)
-    year_str = "Первый год (первогодник, 12:00)" if exp_year == 1 else "Второй год (второгодник, 10:00)"
+    year_str = "1-й (12:00)" if exp_year == 1 else "2-й (10:00)"
 
     library_str = ""
     if stats:
@@ -1625,33 +1604,31 @@ async def handle_user_profile(callback: CallbackQuery):
         top_cats = list(stats["category_hours"].items())[:3]
         top_sts = list(stats["station_hours"].items())[:3]
         
-        sch_str = "\n".join([f"  • {k}: <b>{v}</b> ч." for k, v in top_sch]) if top_sch else "  _Нет сведений_"
-        cat_str = "\n".join([f"  • {k}: <b>{v}</b> ч." for k, v in top_cats]) if top_cats else "  _Нет сведений_"
-        sts_str = "\n".join([f"  • {k}: <b>{v}</b> ч." for k, v in top_sts]) if top_sts else "  _Нет сведений_"
+        sch_str = "\n".join([f"  {k}: <b>{v}</b>ч" for k, v in top_sch]) if top_sch else "  <i>нет данных</i>"
+        cat_str = "\n".join([f"  {k}: <b>{v}</b>ч" for k, v in top_cats]) if top_cats else "  <i>нет данных</i>"
+        sts_str = "\n".join([f"  {k}: <b>{v}</b>ч" for k, v in top_sts]) if top_sts else "  <i>нет данных</i>"
         
         library_str = (
-            f"\n<blockquote expandable>📚 <b>МОИ БИБЛИОТЕКИ ЧАСОВ:</b>\n\n"
-            f"🏫 <b>Школы:</b>\n{sch_str}\n\n"
-            f"🎭 <b>Квесты:</b>\n{cat_str}\n\n"
-            f"🎯 <b>Станции:</b>\n{sts_str}</blockquote>"
+            f"\n<blockquote expandable>📚 <b>Библиотека часов</b>\n\n"
+            f"🏫 Школы:\n{sch_str}\n\n"
+            f"🎭 Квесты:\n{cat_str}\n\n"
+            f"🎯 Станции:\n{sts_str}</blockquote>"
         )
 
     text = (
         f"👤 <b>ПРОФИЛЬ</b>\n\n"
-        f"📛 Имя на сайте: <b>{safe_site_name}</b>\n"
-        f"💬 Telegram: <b>{safe_tg_name}</b> ({safe_tg_username})\n"
-        f"🆔 Telegram ID: <code>{tg_id}</code>\n"
-        f"📞 Телефон: <code>{phone_fmt}</code>\n"
-        f"🎓 Год обучения: <b>{year_str}</b>\n\n"
-        f"📊 <b>ОБЩАЯ СТАТИСТИКА:</b>\n"
-        f"  • Проведено смен: <b>{total_completed}</b>\n"
-        f"  • Отменено смен: <b>{cancelled_val}</b>\n"
-        f"  • Опозданий: <b>{lates}</b>\n"
-        f"  • Отработано времени: <b>{total_hours}</b> ч.\n\n"
-        f"💰 <b>ФИНАНСЫ:</b>\n"
-        f"  • Уже заработано: <b>{already_earned}</b> ₽\n"
-        f"  • В ожидании: <b>{expected_earnings}</b> ₽\n"
-        f"  • Всего заработано: <b>{total_for_month}</b> ₽\n"
+        f"📛 Имя: <b>{safe_site_name}</b>\n"
+        f"💬 TG: <b>{safe_tg_name}</b> ({safe_tg_username})\n"
+        f"📞 Тел: <code>{phone_fmt}</code>\n"
+        f"🎓 Год: <b>{year_str}</b>\n\n"
+        f"📊 <b>Статистика</b>\n"
+        f"  ├ Смен: <b>{total_completed}</b> (отмен: <b>{cancelled_val}</b>)\n"
+        f"  ├ Опозданий: <b>{lates}</b>\n"
+        f"  └ Часов: <b>{total_hours}</b>\n\n"
+        f"💰 <b>Финансы</b>\n"
+        f"  ├ Заработано: <b>{already_earned}</b> ₽\n"
+        f"  ├ Ожидается: <b>{expected_earnings}</b> ₽\n"
+        f"  └ Итого: <b>{total_for_month}</b> ₽\n"
         f"{library_str}"
     )
     now = datetime.now()
@@ -1712,15 +1689,15 @@ async def handle_user_profile(callback: CallbackQuery):
     if plan_button:
         builder.row(plan_button)
         
-    toggle_year_text = "🎓 Сменить на: Второй год (10:00)" if exp_year == 1 else "🎓 Сменить на: Первый год (12:00)"
+    toggle_year_text = "🎓 Сменить на 2-й год (10:00)" if exp_year == 1 else "🎓 Сменить на 1-й год (12:00)"
     builder.row(InlineKeyboardButton(text=toggle_year_text, callback_data="profile_toggle_year"))
     
     builder.row(
         InlineKeyboardButton(text="📜 Лог смен", callback_data="shift_log"),
-        InlineKeyboardButton(text="🔑 Мой пароль", callback_data="show_password")
+        InlineKeyboardButton(text="🔑 Пароль", callback_data="show_password")
     )
     builder.row(
-        InlineKeyboardButton(text="↩️ Главное меню", callback_data="main_menu")
+        InlineKeyboardButton(text="↩️ Меню", callback_data="main_menu")
     )
     await callback.message.edit_text(text, parse_mode="HTML", reply_markup=builder.as_markup())
 
@@ -1970,14 +1947,13 @@ async def go_to_main_menu(callback: CallbackQuery):
     USER_LINK_STATE.pop(cid, None)
     OSINT_SEARCH_RESULTS.pop(cid, None)
     if is_linked(cid):
-        await callback.message.edit_text("🛸 *Главное меню J-GET*\n\nВыбери нужный раздел:", 
+        await callback.message.edit_text("🛸 *J-GET*\n\nВыбери раздел:", 
                                          parse_mode="Markdown", reply_markup=get_main_menu(cid))
     else:
         await callback.message.edit_text(
             "🛸 *Добро пожаловать в J-GET!*\n\n"
-            "Привяжите аккаунт сайта jget-events.ru чтобы получить полный доступ "
-            "к автоматической записи, учету статистики и управлению профилем.\n\n"
-            "Выберите действие:",
+            "Привяжите аккаунт jget-events.ru для доступа "
+            "к автозаписи, статистике и профилю.",
             parse_mode="Markdown", reply_markup=get_onboarding_keyboard()
         )
 
@@ -1988,16 +1964,16 @@ async def handle_guides_menu(callback: CallbackQuery):
     except Exception: pass
     
     text = (
-        "📚 *СПРАВОЧНИК И РУКОВОДСТВА J-GET*\n\n"
-        "Выберите интересующий вас раздел инструкций ниже:"
+        "📚 *ГАЙДЫ*\n\n"
+        "Выберите раздел:"
     )
     builder = InlineKeyboardBuilder()
-    builder.row(InlineKeyboardButton(text="🤖 Инструкция к автозаписи", callback_data="guide_autobooking"))
-    builder.row(InlineKeyboardButton(text="👤 Управление профилем и баланс", callback_data="guide_profile"))
-    builder.row(InlineKeyboardButton(text="🏆 Глобальные Топы и Библиотеки", callback_data="guide_tops"))
-    builder.row(InlineKeyboardButton(text="⚠️ Важная информация", callback_data="guide_important"))
-    builder.row(InlineKeyboardButton(text="❓ Общие вопросы и F.A.Q.", callback_data="guide_faq"))
-    builder.row(InlineKeyboardButton(text="↩️ Главное меню", callback_data="main_menu"))
+    builder.row(InlineKeyboardButton(text="🤖 Автозапись", callback_data="guide_autobooking"))
+    builder.row(InlineKeyboardButton(text="👤 Профиль и баланс", callback_data="guide_profile"))
+    builder.row(InlineKeyboardButton(text="🏆 Топы и библиотеки", callback_data="guide_tops"))
+    builder.row(InlineKeyboardButton(text="⚠️ Важное", callback_data="guide_important"))
+    builder.row(InlineKeyboardButton(text="❓ F.A.Q.", callback_data="guide_faq"))
+    builder.row(InlineKeyboardButton(text="↩️ Меню", callback_data="main_menu"))
     
     await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=builder.as_markup())
 
@@ -2006,14 +1982,20 @@ async def handle_guide_autobooking(callback: CallbackQuery):
     try: await callback.answer()
     except Exception: pass
     
+    cid = callback.message.chat.id
+    acc = get_linked_account(cid)
+    exp_year = acc.get("experience_year", 1) if acc else 1
+    storm_time = "10:00" if exp_year == 2 else "12:00"
+    precheck_time = "09:50" if exp_year == 2 else "11:50"
+    
     text = (
         "🤖 *РУКОВОДСТВО ПО АВТОЗАПИСИ*\n\n"
         "Автозапись — это интеллектуальная система, которая ловит и бронирует смены (квесты) на сайте за вас.\n\n"
-        "⏱️ *Как происходит запись по субботам:*\n"
-        "1️⃣ *В 11:50 (Предпроверка):* Бот ищет смены на следующую неделю, подходящие под ваши фильтры.\n"
-        "2️⃣ *В 12:00 (Штурм):* Бот моментально отправляет запросы на бронирование.\n\n"
+        f"⏱️ *Как происходит запись по субботам:*\n"
+        f"1️⃣ *В {precheck_time} (Предпроверка):* Бот ищет смены на следующую неделю, подходящие под ваши фильтры.\n"
+        f"2️⃣ *В {storm_time} (Штурм):* Бот моментально отправляет запросы на бронирование.\n\n"
         "⚙️ *Режимы работы:*\n"
-        "• *С подтверждением:* в 11:50 бот пришлет список найденных смен. Вам нужно нажать кнопку *«Подтвердить автозапись»* до 12:00, чтобы бот записал вас.\n"
+        f"• *С подтверждением:* в {precheck_time} бот пришлет список найденных смен. Вам нужно нажать кнопку *«Подтвердить автозапись»* до {storm_time}, чтобы бот записал вас.\n"
         "• *Авто-режим (без подтверждения):* бот запишет вас на все подходящие смены автоматически.\n\n"
         "🛠️ *Настройка фильтров:*\n"
         "• *Школы:* можно выбрать только определенные школы (белый список) или исключить ненужные (черный список).\n"
@@ -2022,7 +2004,7 @@ async def handle_guide_autobooking(callback: CallbackQuery):
         "• *Кол-во квестов:* лимит смен на один календарный день (от 1 до 6)."
     )
     builder = InlineKeyboardBuilder()
-    builder.row(InlineKeyboardButton(text="↩️ К гайдам", callback_data="guides_menu"))
+    builder.row(InlineKeyboardButton(text="↩️ Назад", callback_data="guides_menu"))
     await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=builder.as_markup())
 
 @router.callback_query(F.data == "guide_profile")
@@ -2047,7 +2029,7 @@ async def handle_guide_profile(callback: CallbackQuery):
         "• Отображает список ваших смен, точное время, школы и роли на выбранный день с удобной кнопкой навигации на Яндекс Карты."
     )
     builder = InlineKeyboardBuilder()
-    builder.row(InlineKeyboardButton(text="↩️ К гайдам", callback_data="guides_menu"))
+    builder.row(InlineKeyboardButton(text="↩️ Назад", callback_data="guides_menu"))
     await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=builder.as_markup())
 
 @router.callback_query(F.data == "guide_important")
@@ -2065,7 +2047,7 @@ async def handle_guide_important(callback: CallbackQuery):
         "Бот берет на себя рутину по бронированию смен, но посещение смен и выполнение работы остается на вас. Не забывайте отменять смены, если не сможете прийти!"
     )
     builder = InlineKeyboardBuilder()
-    builder.row(InlineKeyboardButton(text="↩️ К гайдам", callback_data="guides_menu"))
+    builder.row(InlineKeyboardButton(text="↩️ Назад", callback_data="guides_menu"))
     await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=builder.as_markup())
 
 @router.callback_query(F.data == "guide_tops")
@@ -2090,7 +2072,7 @@ async def handle_guide_tops(callback: CallbackQuery):
         "💡 _Используйте стрелочки под топом, чтобы переключаться между разными категориями лидербордов!_"
     )
     builder = InlineKeyboardBuilder()
-    builder.row(InlineKeyboardButton(text="↩️ К гайдам", callback_data="guides_menu"))
+    builder.row(InlineKeyboardButton(text="↩️ Назад", callback_data="guides_menu"))
     await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=builder.as_markup())
 
 @router.callback_query(F.data == "guide_faq")
@@ -2108,7 +2090,7 @@ async def handle_guide_faq(callback: CallbackQuery):
         "➡️ Перейдите в меню *«Автозапись»* и настройте фильтры заново. Чтобы ловить квесты в любых школах и на любых станциях, просто снимите галочки со всех элементов."
     )
     builder = InlineKeyboardBuilder()
-    builder.row(InlineKeyboardButton(text="↩️ К гайдам", callback_data="guides_menu"))
+    builder.row(InlineKeyboardButton(text="↩️ Назад", callback_data="guides_menu"))
     await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=builder.as_markup())
 
 @router.callback_query(F.data == "osint_search_start")
@@ -2225,12 +2207,13 @@ async def run_saturday_autobooking_precheck(bot: Bot, year_group: int):
             
         matches_text = "\n\n".join(lines)
         
+        storm_time = "10:00" if year_group == 2 else "12:00"
         if settings.get("auto_booking_mode", "confirm") == "auto":
             message_text = (
                 f"🤖 *АВТОЗАПИСЬ (АВТО-РЕЖИМ)*\n\n"
                 f"Найдены следующие смены по вашим фильтрам:\n\n"
                 f"{matches_text}\n\n"
-                f"⚡ Так как у вас включен автоматический режим, бот запишет вас на эти смены ровно в 12:00 без подтверждения."
+                f"⚡ Так как у вас включен автоматический режим, бот запишет вас на эти смены ровно в {storm_time} без подтверждения."
             )
             try:
                 await bot.send_message(
@@ -2245,8 +2228,8 @@ async def run_saturday_autobooking_precheck(bot: Bot, year_group: int):
         message_text = (
             f"🤖 *АВТОЗАПИСЬ: ПОДТВЕРЖДЕНИЕ СМЕН*\n\n"
             f"{matches_text}\n\n"
-            f"⚠️ Нажмите кнопку ниже до 12:00, чтобы подтвердить автозапись на эти смены. "
-            f"При штурме в 12:00 бот автоматически запишет вас."
+            f"⚠️ Нажмите кнопку ниже до {storm_time}, чтобы подтвердить автозапись на эти смены. "
+            f"При штурме в {storm_time} бот автоматически запишет вас."
         )
         
         builder = InlineKeyboardBuilder()
@@ -2486,12 +2469,16 @@ async def handle_auto_booking_menu(callback: CallbackQuery):
     
     mode = settings.get("auto_booking_mode", "confirm")
     
+    exp_year = acc.get("experience_year", 1) if acc else 1
+    storm_time = "10:00" if exp_year == 2 else "12:00"
+    precheck_time = "09:50" if exp_year == 2 else "11:50"
+
     if mode == "auto":
-        desc_text = "Бот автоматически запишет вас на подходящие смены по субботам в 12:00 (и перехватит в будни при их появлении)."
-        mode_display = "Автоматический (без подтверждения)"
+        desc_text = f"Бот автоматически запишет вас на подходящие смены по субботам в {storm_time} (и перехватит в будни при их появлении)."
+        mode_display = f"Автоматический (без подтверждения в {storm_time})"
     else:
-        desc_text = "Каждую субботу в 11:50 вы будете получать уведомление со списком найденных смен для подтверждения."
-        mode_display = "С подтверждением (11:50)"
+        desc_text = f"Каждую субботу в {precheck_time} вы будете получать уведомление со списком найденных смен для подтверждения."
+        mode_display = f"С подтверждением ({precheck_time})"
         
     schools = settings.get("auto_booking_schools", [])
     exclude_mode = settings.get("auto_booking_schools_exclude_mode", False)
@@ -2501,11 +2488,18 @@ async def handle_auto_booking_menu(callback: CallbackQuery):
     else:
         schools_str = "Все школы"
     stations_data = settings.get("auto_booking_stations", {})
+    valid_items = [(cat, nums) for cat, nums in stations_data.items() if nums]
     stations_parts = []
-    for cat, nums in stations_data.items():
-        if nums:
-            stations_parts.append(f"{cat}: {', '.join(map(str, sorted(nums)))}")
-    stations_str = "; ".join(stations_parts) if stations_parts else "Не выбраны"
+    for i, (cat, nums) in enumerate(valid_items):
+        prefix = " ├ 🔹 " if i < len(valid_items) - 1 else " └ 🔹 "
+        suffix = ";" if i < len(valid_items) - 1 else ""
+        stations_parts.append(f"{prefix}{cat}: {', '.join(map(str, sorted(nums)))}{suffix}")
+    
+    if stations_parts:
+        stations_str = "\n" + "\n".join(stations_parts)
+    else:
+        stations_str = " <i>Не выбраны</i>"
+        
     time_mode = settings.get("auto_booking_time_mode", "any")
     if time_mode == "any":
         time_str = "Любое время"
@@ -2519,31 +2513,29 @@ async def handle_auto_booking_menu(callback: CallbackQuery):
         max_quests_str = f"{max_quests} в день"
 
     text = (
-        f"🤖 *АВТОЗАПИСЬ НА КВЕСТЫ*\n\n"
-        f"{desc_text}\n\n"
-        f"ℹ️ *Субботняя автозапись:* {status_str}\n"
-        f"⚡ *Фоновый перехват будней:* {weekday_status_str}\n"
-        f"⚙️ *Режим записи:* {mode_display}\n"
-        f"🏫 *Школы:* _{schools_str}_\n"
-        f"🎯 *Станции:* _{stations_str}_\n"
-        f"⏱️ *Время:* _{time_str}_\n"
-        f"🎮 *Кол-во квестов:* _{max_quests_str}_\n\n"
-        f"📌 *Приоритет станций:* Бот записывает сначала на те станции, которые вы выбрали первыми. "
-        f"Если первая станция будет занята, бот автоматически попробует записать на вторую по приоритету и так далее."
+        f"🤖 <b>АВТОЗАПИСЬ</b>\n\n"
+        f"ℹ️ Субботняя запись: {status_str}\n"
+        f"⚡ Перехват будней: {weekday_status_str}\n"
+        f"⚙️ Режим: <i>{mode_display}</i>\n"
+        f"🏫 Школы: <i>{schools_str}</i>\n"
+        f"🎯 Станции:{stations_str}\n"
+        f"⏱️ Время: <i>{time_str}</i>\n"
+        f"🎮 Лимит: <i>{max_quests_str}</i>\n\n"
+        f"<blockquote expandable>📌 Приоритет станций: Бот записывает сначала на те станции, которые вы выбрали первыми. Если первая станция будет занята, бот автоматически попробует записать на вторую по приоритету и так далее.</blockquote>"
     )
     builder = InlineKeyboardBuilder()
-    toggle_btn_text = "🔴 Выкл. автозапись" if active else "🟢 Вкл. автозапись"
-    toggle_weekday_text = "🔴 Выкл. перехват" if weekday_active else "🟢 Вкл. перехват"
+    toggle_btn_text = "🔴 Выкл. субботу" if active else "🟢 Вкл. субботу"
+    toggle_weekday_text = "🔴 Выкл. будни" if weekday_active else "🟢 Вкл. будни"
     builder.row(
         InlineKeyboardButton(text=toggle_btn_text, callback_data="auto_booking_toggle"),
         InlineKeyboardButton(text=toggle_weekday_text, callback_data="weekday_intercept_toggle")
     )
     
-    mode_btn_text = "🔄 Включить Авто-режим" if mode == "confirm" else "🔄 Включить Подтверждение"
+    mode_btn_text = "🔄 Авто-режим" if mode == "confirm" else "🔄 С подтверждением"
     builder.row(InlineKeyboardButton(text=mode_btn_text, callback_data="auto_booking_mode_toggle"))
     builder.row(InlineKeyboardButton(text="⚙️ Настройки", callback_data="auto_booking_settings_menu"))
-    builder.row(InlineKeyboardButton(text="↩️ Главное меню", callback_data="main_menu"))
-    await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=builder.as_markup())
+    builder.row(InlineKeyboardButton(text="↩️ Меню", callback_data="main_menu"))
+    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=builder.as_markup())
 
 @router.callback_query(F.data == "auto_booking_settings_menu")
 async def handle_auto_booking_settings_menu(callback: CallbackQuery):
@@ -2554,11 +2546,11 @@ async def handle_auto_booking_settings_menu(callback: CallbackQuery):
     )
     builder.row(
         InlineKeyboardButton(text="⏱️ Время", callback_data="auto_booking_select_time"),
-        InlineKeyboardButton(text="🎮 Кол-во квестов", callback_data="auto_booking_select_max_quests")
+        InlineKeyboardButton(text="🎮 Лимит квестов", callback_data="auto_booking_select_max_quests")
     )
-    builder.row(InlineKeyboardButton(text="↩️ Назад в Автозапись", callback_data="auto_booking_menu"))
+    builder.row(InlineKeyboardButton(text="↩️ Назад", callback_data="auto_booking_menu"))
     
-    text = "⚙️ *НАСТРОЙКИ АВТОЗАПИСИ*\n\nВыберите параметр для настройки:"
+    text = "⚙️ *НАСТРОЙКИ*\n\nВыберите параметр:"
     await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=builder.as_markup())
 
 @router.callback_query(F.data == "auto_booking_mode_toggle")
@@ -2650,7 +2642,7 @@ async def handle_auto_booking_select_schools(callback: CallbackQuery):
     )
     
     await callback.message.edit_text(
-        f"🏫 *ВЫБОР ЦЕЛЕВЫХ ШКОЛ*\n\n{mode_desc}Отметьте школы:",
+        f"🏫 *ШКОЛЫ*\n\n{mode_desc}Отметьте нужные:",
         parse_mode="Markdown", reply_markup=builder.as_markup()
     )
 
@@ -2718,7 +2710,7 @@ async def handle_auto_booking_select_stations(callback: CallbackQuery):
         builder.row(InlineKeyboardButton(text=f"🎯 {cat}", callback_data=f"auto_bk_cat_{cat}"))
     builder.row(InlineKeyboardButton(text="↩️ Назад", callback_data="auto_booking_settings_menu"))
     await callback.message.edit_text(
-        "🎯 *ВЫБОР ФАВОРИТ-СТАНЦИЙ*\n\nВыберите категорию квеста для настройки номеров станций:",
+        "🎯 *СТАНЦИИ*\n\nВыберите категорию:",
         parse_mode="Markdown", reply_markup=builder.as_markup()
     )
 
@@ -2757,9 +2749,9 @@ async def render_category_stations_menu(callback: CallbackQuery, cat: str):
         priority_text += "\n"
         
     await callback.message.edit_text(
-        f"🎯 *СТАНЦИИ ДЛЯ КАТЕГОРИИ: {cat}*\n\n"
+        f"🎯 *{cat} — станции*\n\n"
         f"{priority_text}"
-        f"Нажимайте на номера станций для выбора. Порядок нажатия определяет их приоритет (первое нажатие — наивысший приоритет):",
+        f"Порядок нажатия = приоритет:",
         parse_mode="Markdown", reply_markup=builder.as_markup()
     )
 
@@ -2886,9 +2878,9 @@ async def handle_auto_booking_select_max_quests(callback: CallbackQuery):
         limit_display = f"{current_max} квест(ов) в день"
         
     text = (
-        "🎮 *МАКСИМУМ КВЕСТОВ В ДЕНЬ*\n\n"
-        f"Текущий лимит: *{limit_display}*.\n\n"
-        "Выберите максимальное количество смен (квестов), на которые бот может записать вас в течение одного дня:"
+        "🎮 *ЛИМИТ КВЕСТОВ*\n\n"
+        f"Сейчас: *{limit_display}*\n\n"
+        "Выберите максимум смен в день:"
     )
     
     builder = InlineKeyboardBuilder()
@@ -2943,8 +2935,11 @@ async def handle_auto_booking_confirm_confirm(callback: CallbackQuery):
     confirmed = load_confirmed_bookings()
     confirmed[str(cid)] = targets
     save_confirmed_bookings(confirmed)
+    acc = get_linked_account(cid)
+    exp_year = acc.get("experience_year", 1) if acc else 1
+    storm_time = "10:00" if exp_year == 2 else "12:00"
     await callback.message.edit_text(
-        "✅ *Автозапись успешно подтверждена!*\n\nБот автоматически запишет вас на эти смены в субботу в 12:00.",
+        f"✅ *Автозапись успешно подтверждена!*\n\nБот автоматически запишет вас на эти смены в субботу в {storm_time}.",
         parse_mode="Markdown", reply_markup=get_back_btn("user_profile")
     )
 
@@ -2978,8 +2973,7 @@ async def handle_shift_log(callback: CallbackQuery):
     lates = stats["lates"]
     header = (
         f"📜 *ЛОГ СМЕН — {site_name}*\n\n"
-        f"📊 Всего смен: *{total_shifts}* (🏃 {completed_p} + 👑 {completed_l})\n"
-        f"⚠️ Опозданий: *{lates}*\n\n"
+        f"Смен: *{total_shifts}* (🏃 {completed_p} + 👑 {completed_l}) | Опозданий: *{lates}*\n\n"
     )
     history_text = "\n".join(history[-30:])
     if len(history) > 30:
@@ -3256,25 +3250,45 @@ async def handle_admin_panel(callback: CallbackQuery):
     now_msk = get_msk_now()
     days_until_saturday = (5 - now_msk.weekday()) % 7
     
-    # Storm countdown (Saturday 12:00 MSK)
-    next_storm = now_msk.replace(hour=12, minute=0, second=0, microsecond=0) + timedelta(days=days_until_saturday)
-    if next_storm <= now_msk:
-        next_storm += timedelta(days=7)
-    time_to_storm = next_storm - now_msk
-    days_s = time_to_storm.days
-    hours_s, remainder_s = divmod(time_to_storm.seconds, 3600)
-    minutes_s, _ = divmod(remainder_s, 60)
-    storm_countdown = f"{days_s}д {hours_s}ч {minutes_s}м"
+    # Storm countdown Group 1 (Saturday 12:00 MSK)
+    next_storm_g1 = now_msk.replace(hour=12, minute=0, second=0, microsecond=0) + timedelta(days=days_until_saturday)
+    if next_storm_g1 <= now_msk:
+        next_storm_g1 += timedelta(days=7)
+    time_to_storm_g1 = next_storm_g1 - now_msk
+    days_s1 = time_to_storm_g1.days
+    hours_s1, remainder_s1 = divmod(time_to_storm_g1.seconds, 3600)
+    minutes_s1, _ = divmod(remainder_s1, 60)
+    storm_countdown_g1 = f"{days_s1}д {hours_s1}ч {minutes_s1}м"
     
-    # Precheck countdown (Saturday 11:50 MSK)
-    next_precheck = now_msk.replace(hour=11, minute=50, second=0, microsecond=0) + timedelta(days=days_until_saturday)
-    if next_precheck <= now_msk:
-        next_precheck += timedelta(days=7)
-    time_to_precheck = next_precheck - now_msk
-    days_p = time_to_precheck.days
-    hours_p, remainder_p = divmod(time_to_precheck.seconds, 3600)
-    minutes_p, _ = divmod(remainder_p, 60)
-    precheck_countdown = f"{days_p}д {hours_p}ч {minutes_p}м"
+    # Precheck countdown Group 1 (Saturday 11:50 MSK)
+    next_precheck_g1 = now_msk.replace(hour=11, minute=50, second=0, microsecond=0) + timedelta(days=days_until_saturday)
+    if next_precheck_g1 <= now_msk:
+        next_precheck_g1 += timedelta(days=7)
+    time_to_precheck_g1 = next_precheck_g1 - now_msk
+    days_p1 = time_to_precheck_g1.days
+    hours_p1, remainder_p1 = divmod(time_to_precheck_g1.seconds, 3600)
+    minutes_p1, _ = divmod(remainder_p1, 60)
+    precheck_countdown_g1 = f"{days_p1}д {hours_p1}ч {minutes_p1}м"
+
+    # Storm countdown Group 2 (Saturday 10:00 MSK)
+    next_storm_g2 = now_msk.replace(hour=10, minute=0, second=0, microsecond=0) + timedelta(days=days_until_saturday)
+    if next_storm_g2 <= now_msk:
+        next_storm_g2 += timedelta(days=7)
+    time_to_storm_g2 = next_storm_g2 - now_msk
+    days_s2 = time_to_storm_g2.days
+    hours_s2, remainder_s2 = divmod(time_to_storm_g2.seconds, 3600)
+    minutes_s2, _ = divmod(remainder_s2, 60)
+    storm_countdown_g2 = f"{days_s2}д {hours_s2}ч {minutes_s2}м"
+    
+    # Precheck countdown Group 2 (Saturday 09:50 MSK)
+    next_precheck_g2 = now_msk.replace(hour=9, minute=50, second=0, microsecond=0) + timedelta(days=days_until_saturday)
+    if next_precheck_g2 <= now_msk:
+        next_precheck_g2 += timedelta(days=7)
+    time_to_precheck_g2 = next_precheck_g2 - now_msk
+    days_p2 = time_to_precheck_g2.days
+    hours_p2, remainder_p2 = divmod(time_to_precheck_g2.seconds, 3600)
+    minutes_p2, _ = divmod(remainder_p2, 60)
+    precheck_countdown_g2 = f"{days_p2}д {hours_p2}ч {minutes_p2}м"
 
     # --- 2. Build list of registered users and auto-booking statuses ---
     linked_list = []
@@ -3374,29 +3388,27 @@ async def handle_admin_panel(callback: CallbackQuery):
     school_breakdown = "\n".join(school_lines) if school_lines else "  └ Нет свободных слотов"
 
     text = (
-        f"👑 *ПАНЕЛЬ АДМИНИСТРАТОРА* (v{BOT_VERSION})\n\n"
-        f"📊 *Статистика бота:*\n"
-        f"• Привязанных аккаунтов: *{total_linked}*\n"
-        f"• Пользователей с фильтрами: *{total_filters}*\n"
-        f"• Активных автозаписей: *{active_autobooking}*\n"
-        f"• Смен в кэше API: *{cached_events_count}*\n"
-        f"• Потребление RAM: *{ram_str}*\n"
-        f"\n👥 *Список пользователей:*\n{linked_users_str}\n"
-        f"\n⏳ *До субботнего штурма:*\n"
-        f"• Предпроверка (11:50 MSK): *{precheck_countdown}*\n"
-        f"• Автозапись (12:00 MSK): *{storm_countdown}*\n"
+        f"👑 *АДМИН* (v{BOT_VERSION})\n\n"
+        f"📊 *Бот:*\n"
+        f"  ├ Аккаунтов: *{total_linked}*\n"
+        f"  ├ Фильтров: *{total_filters}*\n"
+        f"  ├ Автозаписей: *{active_autobooking}*\n"
+        f"  ├ Смен в кэше: *{cached_events_count}*\n"
+        f"  └ RAM: *{ram_str}*\n"
+        f"\n👥 *Пользователи:*\n{linked_users_str}\n"
+        f"\n⏳ *До штурма (Сб):*\n"
+        f"  2-й год: 09:50 (*{precheck_countdown_g2}*) → 10:00 (*{storm_countdown_g2}*)\n"
+        f"  1-й год: 11:50 (*{precheck_countdown_g1}*) → 12:00 (*{storm_countdown_g1}*)\n"
         f"{bot_profile_str}\n"
-        f"📅 *Сводка Quest API ({cached_events_count} смен):*\n"
-        f"• Всего мест/слотов: *{total_booked_slots + total_free_slots}*\n"
-        f"  └ Свободно (для записи): *{total_free_slots}*\n"
-        f"  └ Занято (записано): *{total_booked_slots}*\n"
-        f"• Слоты по категориям:\n{cat_breakdown}\n"
-        f"• Топ школ по свободным слотам:\n{school_breakdown}\n"
+        f"📅 *API ({cached_events_count} смен):*\n"
+        f"  ├ Всего: *{total_booked_slots + total_free_slots}* (своб: *{total_free_slots}*, зан: *{total_booked_slots}*)\n"
+        f"  ├ Категории:\n{cat_breakdown}\n"
+        f"  └ Топ школ:\n{school_breakdown}\n"
     )
     
     builder = InlineKeyboardBuilder()
     builder.row(InlineKeyboardButton(text="🔄 Обновить", callback_data="admin_panel"))
-    builder.row(InlineKeyboardButton(text="↩️ Главное меню", callback_data="main_menu"))
+    builder.row(InlineKeyboardButton(text="↩️ Меню", callback_data="main_menu"))
     await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=builder.as_markup())
 
 def format_name_for_top(first_name, last_name, is_admin):
@@ -3616,9 +3628,9 @@ def get_tops_menu(top_index, tops_data):
     next_idx = top_index + 1 if top_index < len(TOP_IDS) - 1 else 0
     
     nav_buttons = [
-        InlineKeyboardButton(text="⬅️ Пред. топ", callback_data=f"tops_nav_{prev_idx}"),
+        InlineKeyboardButton(text="⬅️", callback_data=f"tops_nav_{prev_idx}"),
         InlineKeyboardButton(text=f"{top_index + 1}/{len(TOP_IDS)}", callback_data="ignore"),
-        InlineKeyboardButton(text="След. топ ➡️", callback_data=f"tops_nav_{next_idx}")
+        InlineKeyboardButton(text="➡️", callback_data=f"tops_nav_{next_idx}")
     ]
         
     builder.row(*nav_buttons)
