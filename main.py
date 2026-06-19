@@ -1124,6 +1124,33 @@ async def background_cache_updater():
         gc.collect()
         await asyncio.sleep(30)
 
+async def background_profiles_updater():
+    print(f"[{datetime.now().strftime('%H:%M:%S')}] Фоновое обновление профилей запущено (раз в 5 минут).")
+    while True:
+        try:
+            accounts = load_linked_accounts()
+            updated = False
+            for cid_str, acc in accounts.items():
+                token = acc.get("token")
+                if token:
+                    profile_data, _ = await api_get_profile(token)
+                    if profile_data:
+                        stats = profile_data.get("stats", {})
+                        user_info = profile_data.get("user", {})
+                        conducted = stats.get("conducted", user_info.get("conducted_count", 0))
+                        cancelled = stats.get("cancellations", user_info.get("cancellation_count", 0))
+                        if acc.get("conducted") != conducted or acc.get("cancelled") != cancelled:
+                            accounts[cid_str]["conducted"] = conducted
+                            accounts[cid_str]["cancelled"] = cancelled
+                            updated = True
+                    await asyncio.sleep(0.5) # small delay
+            if updated:
+                save_linked_accounts(accounts)
+        except Exception as e:
+            print(f"[{datetime.now().strftime('%H:%M:%S')}] Ошибка фонового обновления профилей: {e}")
+        
+        await asyncio.sleep(300)
+
 async def background_weekday_autobooking_loop(bot: Bot):
     print(f"[{datetime.now().strftime('%H:%M:%S')}] Фоновый перехват автозаписи запущен.")
     while True:
@@ -1514,20 +1541,6 @@ async def handle_user_profile(callback: CallbackQuery):
     token = acc.get("token")
     conducted = acc.get("conducted", 0)
     cancelled = acc.get("cancelled", 0)
-    
-    if token:
-        profile_data, _ = await api_get_profile(token)
-        if profile_data:
-            stats = profile_data.get("stats", {})
-            user_info = profile_data.get("user", {})
-            conducted = stats.get("conducted", user_info.get("conducted_count", 0))
-            cancelled = stats.get("cancellations", user_info.get("cancellation_count", 0))
-            # Save live stats locally
-            accounts = load_linked_accounts()
-            if str(cid) in accounts:
-                accounts[str(cid)]["conducted"] = conducted
-                accounts[str(cid)]["cancelled"] = cancelled
-                save_linked_accounts(accounts)
 
     lates = 0
     player_lates = 0
@@ -3647,6 +3660,7 @@ async def main():
     else:
         print("[!] Запуск с пустым кэшем.")
     asyncio.create_task(background_cache_updater())
+    asyncio.create_task(background_profiles_updater())
     asyncio.create_task(saturday_scheduler_loop(bot))
     asyncio.create_task(background_weekday_autobooking_loop(bot))
     await dp.start_polling(bot)
