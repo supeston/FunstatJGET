@@ -74,7 +74,7 @@ GLOBAL_CACHED_TOPS_USER = None
 PERSISTENT_EVENTS_FILE = "persistent_events.json"
 PERSISTENT_EVENTS = {}
 
-VIP_NAMES = ["макар", "радэль", "радель", "ярик", "карим"]
+VIP_NAMES = ["макар", "радэль", "радель", "ярик", "ярослав", "карим"]
 
 def is_vip(site_name: str) -> bool:
     if not site_name:
