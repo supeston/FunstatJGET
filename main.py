@@ -74,6 +74,7 @@ GLOBAL_CACHED_TOPS_USER = None
 PERSISTENT_EVENTS_FILE = "persistent_events.json"
 PERSISTENT_EVENTS = {}
 
+VIP_CHAT_IDS = {6871586046, 7932533408, 8556418483, 651563285}
 VIP_NAMES = ["макар", "радэль", "радель", "ярик", "ярослав", "карим"]
 
 def is_vip(site_name: str) -> bool:
@@ -1420,8 +1421,7 @@ async def background_weekday_autobooking_loop(bot: Bot):
 def get_main_menu(chat_id=None):
     builder = InlineKeyboardBuilder()
     if chat_id and is_linked(chat_id):
-        acc = get_linked_account(chat_id)
-        if acc and is_vip(acc.get("name", "")):
+        if chat_id in VIP_CHAT_IDS:
             builder.row(
                 InlineKeyboardButton(text="🤖 Автозапись", callback_data="auto_booking_menu")
             )
@@ -2580,7 +2580,7 @@ async def handle_auto_booking_menu(callback: CallbackQuery):
         await callback.answer("🔒 Пожалуйста, сначала привяжите аккаунт", show_alert=True)
         return
     acc = get_linked_account(cid)
-    if not acc or not is_vip(acc.get("name", "")):
+    if cid not in VIP_CHAT_IDS:
         await callback.answer("🚫 У вас нет доступа к функции Автозаписи.", show_alert=True)
         return
     try: await callback.answer()
