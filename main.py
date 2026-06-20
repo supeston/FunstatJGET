@@ -2369,47 +2369,88 @@ async def run_saturday_autobooking_precheck(bot: Bot, year_group: int):
         except Exception as e:
             print(f"[!] Error sending precheck msg to {cid}: {e}")
 
+async def book_user(cid: int, targets: list, bot: Bot, year_group: int):
+    _, token = load_account_auth_by_chat_id(cid)
+    if not token:
+        return
+        
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+        "Accept": "application/json, text/plain, */*",
+        "Authorization": f"Token {token}"
+    }
+    
+    async def book_target(session, t):
+        valid_stats = t.get("valid_stations", [{"station_id": t["station_id"], "station_num": t["station_num"]}])
+        book_start = asyncio.get_event_loop().time()
+        
+        for st in valid_stats:
+            payload = {"event": t["event_id"], "station": st["station_id"]}
+            t["station_num"] = st["station_num"]
+            
+            while asyncio.get_event_loop().time() - book_start < 10:
+                try:
+                    async with session.post(URL_BOOK, json=payload, timeout=5) as r:
+                        if r.status in [200, 201]:
+                            return True, None
+                        elif r.status == 400:
+                            try:
+                                res = await r.json()
+                            except Exception:
+                                res = {}
+                            err_msg = str(res.get("error", ""))
+                            if "Уже записан" in err_msg:
+                                return True, "already"
+                            elif "запись закрыта" in err_msg.lower() or "не начата" in err_msg.lower():
+                                await asyncio.sleep(0.1)
+                                continue
+                            else:
+                                break
+                        else:
+                            break
+                except Exception:
+                    await asyncio.sleep(0.1)
+            else:
+                return False, "Превышено время ожидания"
+        return False, "Все станции заняты или ошибка"
+        
+    async with aiohttp.ClientSession(headers=headers) as session:
+        results = await asyncio.gather(*[book_target(session, t) for t in targets])
+        
+        success_count = sum(1 for ok, err in results if ok)
+        report_lines = []
+        for t, (ok, err) in zip(targets, results):
+            status_symbol = "🟢" if ok else "🔴"
+            status_reason = "(уже записан)" if err == "already" else (f"({err})" if err else "")
+            report_lines.append(
+                f"{status_symbol} {t['date']} {t['time']} | {t['school']} | Станция {t['station_num']} {status_reason}"
+            )
+            
+        report_lines_joined = "\n".join(report_lines)
+        time_display = "10:00" if year_group == 2 else "12:00"
+        report_text = (
+            f"🤖 *ОТЧЕТ ОБ АВТОЗАПИСИ (Суббота {time_display})*\n\n"
+            f"Бот завершил попытку автозаписи на подтвержденные смены:\n\n"
+            f"{report_lines_joined}\n\n"
+            f"Записано смен: *{success_count}* из *{len(targets)}*."
+        )
+        try:
+            await bot.send_message(chat_id=cid, text=report_text, parse_mode="Markdown")
+        except Exception as e:
+            print(f"[!] Error sending Saturday report to {cid}: {e}")
+
 async def run_saturday_user_autobooking(bot: Bot, year_group: int):
     print(f"[{datetime.now().strftime('%H:%M:%S')}] Запуск Saturday User Auto-booking Storm для группы {year_group}...")
     confirmed = load_confirmed_bookings()
+    linked = load_linked_accounts()
     
     # Check for "auto" mode users and find matches live
-    linked = load_linked_accounts()
     group_users = []
     for uid_str, acc in linked.items():
         ug = acc.get("experience_year", 1)
         if ug == year_group:
             group_users.append(int(uid_str))
             
-    target_users = []
-    priority_id = 6871586046
-    if priority_id in group_users:
-        target_users.append(priority_id)
-    for uid in group_users:
-        if uid != priority_id:
-            target_users.append(uid)
-            
-    auto_users = []
-    for cid in target_users:
-        cid_str = str(cid)
-        if cid_str not in linked:
-            continue
-        settings = get_auto_booking_settings(cid)
-        if settings.get("auto_booking_active", False) and settings.get("auto_booking_mode", "confirm") == "auto":
-            auto_users.append(cid)
-            
-    if auto_users:
-        data, err = await fetch_all_data()
-        if data:
-            now = datetime.now()
-            for cid in auto_users:
-                cid_str = str(cid)
-                user_name = linked.get(cid_str, {}).get("name", "").strip().lower()
-                settings = get_auto_booking_settings(cid)
-                matches = get_smart_matches(data, user_name, settings)
-                if matches:
-                    confirmed[cid_str] = matches
-
     # Filter confirmed bookings to only include users from this year_group
     confirmed_group = {}
     for c_id_str, tgts in confirmed.items():
@@ -2419,150 +2460,181 @@ async def run_saturday_user_autobooking(bot: Bot, year_group: int):
             continue
         if c_id in group_users:
             confirmed_group[c_id_str] = tgts
-
-    if not confirmed_group:
-        print(f"[!] Confirmed user bookings empty for group {year_group}.")
-        return
-        
+            
+    auto_users = []
+    for cid in group_users:
+        cid_str = str(cid)
+        settings = get_auto_booking_settings(cid)
+        if settings.get("auto_booking_active", False) and settings.get("auto_booking_mode", "confirm") == "auto":
+            # Avoid duplicate matching/booking if they already confirmed manually
+            if cid_str not in confirmed_group:
+                auto_users.append(cid)
+                
     priority_id_str = "6871586046"
-    confirmed_keys = list(confirmed_group.keys())
-    ordered_keys = []
-    if priority_id_str in confirmed_keys:
-        ordered_keys.append(priority_id_str)
-    for k in confirmed_keys:
-        if k != priority_id_str:
-            ordered_keys.append(k)
+    priority_id = 6871586046
+    
+    async def book_users_concurrently(users_dict):
+        active_bookings = {cid_str: tgts for cid_str, tgts in users_dict.items() if tgts}
+        if not active_bookings:
+            return
             
-    for cid_str in ordered_keys:
-        targets = confirmed_group[cid_str]
-        if not targets:
-            continue
-        try:
-            cid = int(cid_str)
-        except Exception:
-            continue
-            
-        _, token = load_account_auth_by_chat_id(cid)
-        if not token:
-            continue
-            
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
-            "Accept": "application/json, text/plain, */*",
-            "Authorization": f"Token {token}"
-        }
+        # Extract admin targets for priority execution
+        admin_targets = active_bookings.pop(priority_id_str, None)
         
-        async def book_target(session, t):
-            valid_stats = t.get("valid_stations", [{"station_id": t["station_id"], "station_num": t["station_num"]}])
-            book_start = asyncio.get_event_loop().time()
+        admin_task = None
+        if admin_targets:
+            print(f"[{datetime.now().strftime('%H:%M:%S')}] Приоритетный запуск автозаписи для Админа {priority_id_str}...")
+            admin_task = asyncio.create_task(book_user(priority_id, admin_targets, bot, year_group))
+            # Give admin a 50ms head start
+            await asyncio.sleep(0.05)
             
-            for st in valid_stats:
-                payload = {"event": t["event_id"], "station": st["station_id"]}
-                t["station_num"] = st["station_num"]
-                
-                while asyncio.get_event_loop().time() - book_start < 10:
-                    try:
-                        async with session.post(URL_BOOK, json=payload, timeout=5) as r:
-                            if r.status in [200, 201]:
-                                return True, None
-                            elif r.status == 400:
-                                try:
-                                    res = await r.json()
-                                except Exception:
-                                    res = {}
-                                err_msg = str(res.get("error", ""))
-                                if "Уже записан" in err_msg:
-                                    return True, "already"
-                                elif "запись закрыта" in err_msg.lower() or "не начата" in err_msg.lower():
-                                    await asyncio.sleep(0.1)
-                                    continue
-                                else:
-                                    break
-                            else:
-                                break
-                    except Exception:
-                        await asyncio.sleep(0.1)
-                else:
-                    return False, "Превышено время ожидания"
-            return False, "Все станции заняты или ошибка"
+        # Start other users concurrently
+        other_tasks = []
+        for cid_str, tgts in active_bookings.items():
+            print(f"[{datetime.now().strftime('%H:%M:%S')}] Параллельный запуск автозаписи для пользователя {cid_str}...")
+            other_tasks.append(asyncio.create_task(book_user(int(cid_str), tgts, bot, year_group)))
             
-        async with aiohttp.ClientSession(headers=headers) as session:
-            results = await asyncio.gather(*[book_target(session, t) for t in targets])
+        all_tasks = []
+        if admin_task:
+            all_tasks.append(admin_task)
+        all_tasks.extend(other_tasks)
+        
+        if all_tasks:
+            await asyncio.gather(*all_tasks)
+
+    # 1. Start confirmed bookings immediately (they don't need fetch_all_data)
+    confirmed_booking_task = None
+    if confirmed_group:
+        print(f"[{datetime.now().strftime('%H:%M:%S')}] Мгновенный запуск подтвержденных смен для {len(confirmed_group)} пользователей...")
+        confirmed_booking_task = asyncio.create_task(book_users_concurrently(confirmed_group))
+        
+    # 2. Concurrently fetch and match for "auto" users
+    async def handle_auto_users():
+        if not auto_users:
+            return
+        print(f"[{datetime.now().strftime('%H:%M:%S')}] Получение данных J-GET для {len(auto_users)} авто-пользователей...")
+        data, err = await fetch_all_data()
+        if not data:
+            print(f"[!] Не удалось получить данные автозаписи: {err}")
+            return
             
-            success_count = sum(1 for ok, err in results if ok)
-            report_lines = []
-            for t, (ok, err) in zip(targets, results):
-                status_symbol = "🟢" if ok else "🔴"
-                status_reason = "(уже записан)" if err == "already" else (f"({err})" if err else "")
-                report_lines.append(
-                    f"{status_symbol} {t['date']} {t['time']} | {t['school']} | Станция {t['station_num']} {status_reason}"
-                )
+        auto_bookings = {}
+        for cid in auto_users:
+            cid_str = str(cid)
+            user_name = linked.get(cid_str, {}).get("name", "").strip().lower()
+            settings = get_auto_booking_settings(cid)
+            matches = get_smart_matches(data, user_name, settings)
+            if matches:
+                auto_bookings[cid_str] = matches
                 
-            report_lines_joined = "\n".join(report_lines)
-            time_display = "10:00" if year_group == 2 else "12:00"
-            report_text = (
-                f"🤖 *ОТЧЕТ ОБ АВТОЗАПИСИ (Суббота {time_display})*\n\n"
-                f"Бот завершил попытку автозаписи на подтвержденные смены:\n\n"
-                f"{report_lines_joined}\n\n"
-                f"Записано смен: *{success_count}* из *{len(targets)}*."
-            )
-            try:
-                await bot.send_message(chat_id=cid, text=report_text, parse_mode="Markdown")
-            except Exception:
-                pass
-                
-    # Clear only the bookings for this group from confirmed bookings
+        if auto_bookings:
+            print(f"[{datetime.now().strftime('%H:%M:%S')}] Найдено {len(auto_bookings)} авто-бронирований, запускаем их...")
+            await book_users_concurrently(auto_bookings)
+
+    auto_booking_task = asyncio.create_task(handle_auto_users())
+    
+    # Wait for both flows to complete
+    if confirmed_booking_task:
+        await confirmed_booking_task
+    await auto_booking_task
+
+    # Clear processed confirmed bookings from the persistent json
     current_confirmed = load_confirmed_bookings()
     for cid_str in confirmed_group.keys():
         current_confirmed.pop(cid_str, None)
     save_confirmed_bookings(current_confirmed)
 
+async def save_scheduler_config_async(cfg):
+    save_scheduler_config(cfg)
+
+async def wait_until_precise(target_time: datetime):
+    while True:
+        now = get_msk_now()
+        diff = (target_time - now).total_seconds()
+        if diff <= 0:
+            break
+        if diff > 0.05:
+            await asyncio.sleep(0.005)
+        else:
+            pass
+
 async def saturday_scheduler_loop(bot: Bot):
+    print(f"[{datetime.now().strftime('%H:%M:%S')}] Планировщик субботы запущен.")
+    
+    triggered_precheck_g2 = ""
+    triggered_storm_g2 = ""
+    triggered_precheck_g1 = ""
+    triggered_storm_g1 = ""
+    
     while True:
         try:
             cfg = load_scheduler_config()
             now_msk = get_msk_now()
             today_str = now_msk.strftime("%Y-%m-%d")
             
+            # Sync with config file on startup or refresh
+            last_pre_g2 = cfg.get("last_precheck_date_g2", "")
+            last_bk_g2 = cfg.get("last_user_booking_date_g2", "")
+            last_pre_g1 = cfg.get("last_precheck_date_g1", "")
+            last_bk_g1 = cfg.get("last_user_booking_date_g1", "")
+            
             # 5 is Saturday
             if now_msk.weekday() == 5:
                 # --- Group 2 (Second year) ---
                 # Precheck at 09:50
                 if now_msk.hour == 9 and now_msk.minute == 50:
-                    last_pre = cfg.get("last_precheck_date_g2", "")
-                    if last_pre != today_str:
+                    if last_pre_g2 != today_str and triggered_precheck_g2 != today_str:
+                        triggered_precheck_g2 = today_str
                         cfg["last_precheck_date_g2"] = today_str
-                        save_scheduler_config(cfg)
+                        asyncio.create_task(save_scheduler_config_async(cfg))
                         asyncio.create_task(run_saturday_autobooking_precheck(bot, 2))
                         
-                # Storm at 10:00
-                if now_msk.hour == 10 and now_msk.minute == 0:
-                    last_user_bk = cfg.get("last_user_booking_date_g2", "")
-                    if last_user_bk != today_str:
+                # Storm at 10:00 (target time: 09:59:59.990)
+                if last_bk_g2 != today_str and triggered_storm_g2 != today_str:
+                    target_g2 = now_msk.replace(hour=9, minute=59, second=59, microsecond=990000)
+                    if now_msk.hour == 9 and now_msk.minute == 59:
+                        print(f"[{datetime.now().strftime('%H:%M:%S')}] Приближается штурм G2 (10:00). Переход на высокоточный таймер...")
+                        await wait_until_precise(target_g2)
+                        triggered_storm_g2 = today_str
                         cfg["last_user_booking_date_g2"] = today_str
-                        save_scheduler_config(cfg)
                         asyncio.create_task(run_saturday_user_autobooking(bot, 2))
+                        asyncio.create_task(save_scheduler_config_async(cfg))
+                    elif now_msk.hour == 10 and now_msk.minute <= 5:
+                        print(f"[{datetime.now().strftime('%H:%M:%S')}] Обнаружено опоздание на штурм G2. Запуск немедленно.")
+                        triggered_storm_g2 = today_str
+                        cfg["last_user_booking_date_g2"] = today_str
+                        asyncio.create_task(run_saturday_user_autobooking(bot, 2))
+                        asyncio.create_task(save_scheduler_config_async(cfg))
                         
                 # --- Group 1 (First year) ---
                 # Precheck at 11:50
                 if now_msk.hour == 11 and now_msk.minute == 50:
-                    last_pre = cfg.get("last_precheck_date_g1", "")
-                    if last_pre != today_str:
+                    if last_pre_g1 != today_str and triggered_precheck_g1 != today_str:
+                        triggered_precheck_g1 = today_str
                         cfg["last_precheck_date_g1"] = today_str
-                        save_scheduler_config(cfg)
+                        asyncio.create_task(save_scheduler_config_async(cfg))
                         asyncio.create_task(run_saturday_autobooking_precheck(bot, 1))
                         
-                # Storm at 12:00
-                if now_msk.hour == 12 and now_msk.minute == 0:
-                    last_user_bk = cfg.get("last_user_booking_date_g1", "")
-                    if last_user_bk != today_str:
+                # Storm at 12:00 (target time: 11:59:59.990)
+                if last_bk_g1 != today_str and triggered_storm_g1 != today_str:
+                    target_g1 = now_msk.replace(hour=11, minute=59, second=59, microsecond=990000)
+                    if now_msk.hour == 11 and now_msk.minute == 59:
+                        print(f"[{datetime.now().strftime('%H:%M:%S')}] Приближается штурм G1 (12:00). Переход на высокоточный таймер...")
+                        await wait_until_precise(target_g1)
+                        triggered_storm_g1 = today_str
                         cfg["last_user_booking_date_g1"] = today_str
-                        save_scheduler_config(cfg)
                         asyncio.create_task(run_saturday_user_autobooking(bot, 1))
+                        asyncio.create_task(save_scheduler_config_async(cfg))
+                    elif now_msk.hour == 12 and now_msk.minute <= 5:
+                        print(f"[{datetime.now().strftime('%H:%M:%S')}] Обнаружено опоздание на штурм G1. Запуск немедленно.")
+                        triggered_storm_g1 = today_str
+                        cfg["last_user_booking_date_g1"] = today_str
+                        asyncio.create_task(run_saturday_user_autobooking(bot, 1))
+                        asyncio.create_task(save_scheduler_config_async(cfg))
             
         except Exception as e:
             print(f"Ошибка в планировщике: {e}")
-        await asyncio.sleep(5)
+        await asyncio.sleep(0.5)
 
 
 
