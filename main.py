@@ -112,6 +112,7 @@ def merge_into_persistent(new_events):
                 updated = True
     if updated:
         save_persistent_events()
+    return updated
 
 router = Router()
 router.message.filter(F.chat.type == "private")
@@ -1225,23 +1226,30 @@ async def api_get_profile(token):
 
 async def background_cache_updater():
     global GLOBAL_CACHED_DATA, GLOBAL_CACHED_TOPS_ADMIN, GLOBAL_CACHED_TOPS_USER
+    last_log_time = 0
     while True:
         data, err = await fetch_all_data()
         if not err and data:
             GLOBAL_CACHED_DATA = data
-            merge_into_persistent(data)
-            try:
-                GLOBAL_CACHED_TOPS_ADMIN = calculate_tops(is_admin=True)
-                GLOBAL_CACHED_TOPS_USER = calculate_tops(is_admin=False)
-            except Exception as e:
-                print(f"[{datetime.now().strftime('%H:%M:%S')}] Ошибка кэширования топов: {e}")
-            print(f"[{datetime.now().strftime('%H:%M:%S')}] Глобальный кэш успешно обновлен.")
+            changes = merge_into_persistent(data)
+            if changes:
+                try:
+                    GLOBAL_CACHED_TOPS_ADMIN = calculate_tops(is_admin=True)
+                    GLOBAL_CACHED_TOPS_USER = calculate_tops(is_admin=False)
+                except Exception as e:
+                    print(f"[{datetime.now().strftime('%H:%M:%S')}] Ошибка кэширования топов: {e}")
+                print(f"[{datetime.now().strftime('%H:%M:%S')}] Глобальный кэш успешно обновлен (есть изменения в базе).")
+            else:
+                now_time = time.time()
+                if now_time - last_log_time >= 60:
+                    print(f"[{datetime.now().strftime('%H:%M:%S')}] Глобальный кэш успешно обновлен (без изменений).")
+                    last_log_time = now_time
         else:
             print(f"[{datetime.now().strftime('%H:%M:%S')}] Ошибка фонового обновления: {err}")
         
         # Periodic garbage collection to ensure minimized RAM footprint
         gc.collect()
-        await asyncio.sleep(30)
+        await asyncio.sleep(1)
 
 async def background_profiles_updater():
     print(f"[{datetime.now().strftime('%H:%M:%S')}] Фоновое обновление профилей запущено (раз в 5 минут).")
@@ -1371,6 +1379,7 @@ async def background_weekday_autobooking_loop(bot: Bot):
                             if valid_stations:
                                 booked_ok = False
                                 booked_num = None
+                                booked_station_id = None
                                 for stat_id, stat_num in valid_stations:
                                     payload = {"event": ev.get("id"), "station": stat_id}
                                     try:
@@ -1378,6 +1387,7 @@ async def background_weekday_autobooking_loop(bot: Bot):
                                             if r.status in [200, 201]:
                                                 booked_ok = True
                                                 booked_num = stat_num
+                                                booked_station_id = stat_id
                                                 break
                                             elif r.status == 400:
                                                 try:
@@ -1392,6 +1402,12 @@ async def background_weekday_autobooking_loop(bot: Bot):
                                     await asyncio.sleep(0.5)
 
                                 if booked_ok:
+                                    # Mark the station as unavailable in memory to prevent other users from trying to book the same station
+                                    for s in ev.get("available_stations", []):
+                                        if s.get("id") == booked_station_id:
+                                            s["is_available"] = False
+                                            break
+
                                     newly_booked_shifts.setdefault(ev_date_str, []).append({
                                         "start_time": ev.get("start_time")[:5],
                                         "end_time": ev.get("end_time")[:5],
@@ -1416,7 +1432,7 @@ async def background_weekday_autobooking_loop(bot: Bot):
                                 await asyncio.sleep(0.5)
         except Exception as ex:
             print(f"[!] Error in background weekday loop: {ex}")
-        await asyncio.sleep(30)
+        await asyncio.sleep(1)
 
 def get_main_menu(chat_id=None):
     builder = InlineKeyboardBuilder()
