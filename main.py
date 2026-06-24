@@ -99,9 +99,9 @@ def format_compact_shifts_list(shifts: list, is_saturday_preview: bool = False) 
             day_name = d_str
             
         if is_future_day:
-            day_header = f"📅 *{day_name}* (Предстоит)"
+            day_header = f"*{day_name}* (Предстоит)"
         else:
-            day_header = f"📅 *{day_name}*"
+            day_header = f"*{day_name}*"
         
         by_school = {}
         for s in day_shifts:
@@ -121,21 +121,21 @@ def format_compact_shifts_list(shifts: list, is_saturday_preview: bool = False) 
                     if item.get("is_completed"):
                         if not item.get("attended", True):
                             status_str = " (Прогул)"
-                            line_icon = "[✖]"
+                            line_icon = "❌"
                         elif item.get("late", False):
                             status_str = " (Опоздание)"
-                            line_icon = "[!]"
+                            line_icon = "⚠️"
                         else:
-                            line_icon = "[✔]"
+                            line_icon = "✅"
                     else:
-                        line_icon = "[ ]"
+                        line_icon = "⏳"
                         
                     role_val = item.get("role", "Ведущий")
                     details_str = f"{item['category']} ({role_val}{status_str})"
                 
                 merged_lines.append(f"  {line_icon} {item['start_time'][:5]}-{item['end_time'][:5]} | {details_str}")
                 
-            school_header = f" 🏫 *{school}*:"
+            school_header = f"*{school}*:"
             school_lines.append(school_header + "\n" + "\n".join(merged_lines))
             
         day_blocks.append(day_header + "\n" + "\n".join(school_lines))
