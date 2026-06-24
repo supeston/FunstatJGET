@@ -117,17 +117,17 @@ def format_compact_shifts_list(shifts: list, is_saturday_preview: bool = False) 
             is_last_school = (school_idx == num_schools - 1)
             
             # School tree prefix
-            school_prefix = "└── 🏫 " if is_last_school else "├── 🏫 "
-            school_header = f"{school_prefix}*{school}*"
+            school_prefix = "└─ " if is_last_school else "├─ "
+            school_header = f"{school_prefix}🏫 *{school}*"
             
             # Shift prefix for indenting shifts under this school
-            child_indent = "    " if is_last_school else "│   "
+            child_indent = "   " if is_last_school else "│  "
             
             merged_lines = []
             num_shifts = len(s_shifts)
             for shift_idx, item in enumerate(s_shifts):
                 is_last_shift = (shift_idx == num_shifts - 1)
-                shift_branch = "└── " if is_last_shift else "├── "
+                shift_branch = "└─ " if is_last_shift else "├─ "
                 
                 if is_saturday_preview:
                     station_val = item.get("station_num", "?")
