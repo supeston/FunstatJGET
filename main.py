@@ -64,6 +64,95 @@ STATIONS_MAP = {
 MONTHS_RU = {1: "янв", 2: "фев", 3: "мар", 4: "апр", 5: "мая", 6: "июн", 7: "июл", 8: "авг", 9: "сен", 10: "окт", 11: "ноя", 12: "дек"}
 DAYS_RU = {0: "Понедельник", 1: "Вторник", 2: "Среда", 3: "Четверг", 4: "Пятница", 5: "Суббота", 6: "Воскресенье"}
 
+def normalize_phone_for_display(phone_str: str) -> str:
+    if not phone_str:
+        return ""
+    digits = "".join(c for c in str(phone_str) if c.isdigit())
+    if len(digits) == 10:
+        return f"+7{digits}"
+    elif len(digits) == 11:
+        if digits.startswith("8") or digits.startswith("7"):
+            return f"+7{digits[1:]}"
+        return f"+{digits}"
+    elif len(digits) > 0:
+        return f"+{digits}"
+    return ""
+
+def format_compact_shifts_list(shifts: list, is_saturday_preview: bool = False) -> str:
+    if not shifts:
+        return ""
+        
+    by_date = {}
+    for s in shifts:
+        by_date.setdefault(s["date"], []).append(s)
+        
+    sorted_dates = sorted(by_date.keys())
+    
+    day_blocks = []
+    for d_str in sorted_dates:
+        day_shifts = by_date[d_str]
+        try:
+            dt = datetime.strptime(d_str, "%Y-%m-%d")
+            day_name = DAYS_RU.get(dt.weekday(), "Неизвестно")
+        except Exception:
+            day_name = d_str
+            
+        day_header = f"📅 *{day_name}*"
+        
+        by_school = {}
+        for s in day_shifts:
+            by_school.setdefault(s["school"], []).append(s)
+            
+        school_lines = []
+        for school, s_shifts in sorted(by_school.items()):
+            s_shifts = sorted(s_shifts, key=lambda x: x["start_time"])
+            
+            merged = []
+            for s in s_shifts:
+                if not merged:
+                    merged.append({
+                        "start_time": s["start_time"],
+                        "end_time": s["end_time"],
+                        "items": [s]
+                    })
+                else:
+                    last = merged[-1]
+                    if last["end_time"] == s["start_time"]:
+                        last["end_time"] = s["end_time"]
+                        last["items"].append(s)
+                    else:
+                        merged.append({
+                            "start_time": s["start_time"],
+                            "end_time": s["end_time"],
+                            "items": [s]
+                        })
+            
+            merged_lines = []
+            for block in merged:
+                details = []
+                for item in block["items"]:
+                    if is_saturday_preview:
+                        details.append(f"{item['category']} (ст. {item['station_num']})")
+                    else:
+                        status_str = ""
+                        if item.get("is_completed"):
+                            if not item.get("attended", True):
+                                status_str = " ❌ (Прогул)"
+                            elif item.get("late", False):
+                                status_str = " ⚠️ (Опоздание)"
+                        role_val = item.get("role", "Ведущий")
+                        details.append(f"{item['category']} ({role_val}{status_str})")
+                details_str = " + ".join(details)
+                merged_lines.append(f"  • ⏱️ {block['start_time']}-{block['end_time']} | 🎯 {details_str}")
+                
+            school_header = f" 🏫 *{school}*:"
+            school_lines.append(school_header + "\n" + "\n".join(merged_lines))
+            
+        day_blocks.append(day_header + "\n" + "\n".join(school_lines))
+        
+    return "\n\n".join(day_blocks)
+
+
 BOT_MESSAGE_ID = {}
 USER_LINK_STATE = {}
 TEMP_AUTO_BOOKINGS = {}
@@ -703,7 +792,7 @@ def get_user_stats(site_name, events_list):
         st_obj = user_p.get("station")
         st_name = st_obj.get("name") if isinstance(st_obj, dict) else ""
         st_num = get_station_num(st_name)
-        role = "Главарь" if as_leader else (f"Станция {st_num}" if st_num else "Без позиции")
+        role = "Главарь" if as_leader else (f"Станция {st_num}" if st_num else "Ведущий")
         
         if is_completed:
             if attended:
@@ -723,12 +812,20 @@ def get_user_stats(site_name, events_list):
                 category_mins[clean_cat] = category_mins.get(clean_cat, 0) + total_work_mins
                 station_mins[role] = station_mins.get(role, 0) + total_work_mins
                         
-        hist_item = f"• {date_str} | {clean_category_name(raw_cat)} — *{role}* ({school})"
-        if is_completed and attended and late:
-            hist_item += " ⚠️ (Опоздание)"
+        hist_item = {
+            "date": date_str,
+            "category": clean_category_name(raw_cat),
+            "role": role,
+            "school": school,
+            "is_completed": is_completed,
+            "attended": attended,
+            "late": late,
+            "start_time": event.get("start_time", "00:00:00")[:5],
+            "end_time": event.get("end_time", "00:00:00")[:5]
+        }
         history.append(hist_item)
         
-    history = sorted(history)
+    history = sorted(history, key=lambda x: (x["date"], x["start_time"]))
     
     school_hours = {k: round(v / 60, 1) for k, v in sorted(school_mins.items(), key=lambda item: item[1], reverse=True)}
     category_hours = {k: round(v / 60, 1) for k, v in sorted(category_mins.items(), key=lambda item: item[1], reverse=True)}
@@ -1818,7 +1915,7 @@ async def handle_user_profile(callback: CallbackQuery):
                             st_obj = p.get("station")
                             st_name = st_obj.get("name") if isinstance(st_obj, dict) else ""
                             st_num = get_station_num(st_name)
-                            role_str = f"{st_num} станция" if st_num else "без позиции"
+                            role_str = f"{st_num} станция" if st_num else "ведущий"
                         tomorrow_shifts.append((start_time, f"{sch_clean}, {category} {start_time}-{end_time}, {role_str}"))
 
     plan_button = None
@@ -1932,7 +2029,13 @@ async def handle_today_plan(callback: CallbackQuery):
                     leader_name = "Не назначен"
                     for participant in event.get("participants", []):
                         if participant.get("as_leader"):
-                            leader_name = f"{participant.get('first_name', '')} {participant.get('last_name', '')}".strip()
+                            p_fn = participant.get("first_name", "").strip()
+                            p_ln = participant.get("last_name", "").strip()
+                            p_full = f"{p_fn} {p_ln}".strip()
+                            p_phone = participant.get("phone", "")
+                            norm_phone = normalize_phone_for_display(p_phone)
+                            phone_suffix = f" {norm_phone}" if norm_phone else ""
+                            leader_name = f"{p_full}{phone_suffix}".strip()
                             break
 
                     if as_leader:
@@ -1963,7 +2066,11 @@ async def handle_today_plan(callback: CallbackQuery):
                                     p_st_name = p_st_obj.get("name") if isinstance(p_st_obj, dict) else ""
                                     p_st_num = get_station_num(p_st_name)
                                     p_role = f"Станция {p_st_num}" if p_st_num else "Ведущий"
-                                friend_list.append(f"{p_fn} ({p_role})")
+                                    
+                                p_phone = participant.get("phone", "")
+                                norm_phone = normalize_phone_for_display(p_phone)
+                                phone_suffix = f" {norm_phone}" if norm_phone else ""
+                                friend_list.append(f"{p_full}{phone_suffix} ({p_role})")
                         if friend_list:
                             friends = "\n🤝 Свои на смене: *" + ", ".join(friend_list) + "*"
 
@@ -2163,7 +2270,7 @@ async def handle_guide_profile(callback: CallbackQuery):
         "• *Опозданий:* количество смен с отметкой об опоздании.\n"
         "• *Часов:* суммарное время работы (1 смена = 1 час).\n\n"
         "💰 *Финансовый учет:*\n"
-        "• Расчет ведется по ставкам: *1000 ₽* за Главаря, *500 ₽* за Игрока (или *400 ₽* при опоздании).\n"
+        "• Расчет ведется по ставкам: *1000 ₽* за Главаря, *500 ₽* за Ведущего (или *400 ₽* при опоздании).\n"
         "• *Уже заработано:* сумма за все прошедшие смены.\n"
         "• *В ожидании:* сумма за будущие смены, на которые вы уже записаны.\n"
         "• *Всего заработано:* общая сумма (заработанное + ожидаемое).\n\n"
@@ -2208,7 +2315,7 @@ async def handle_guide_tops(callback: CallbackQuery):
         "🏆 *Глобальные Топы (Главное меню):*\n"
         "Вы можете соревноваться со всеми пользователями бота! Доступны 7 категорий:\n"
         "1. *Топ по часам* — кто больше всех отработал?\n"
-        "2. *Топ Главарей* / *Топ Игроков* — лидеры по ролям.\n"
+        "2. *Топ Главарей* / *Топ Ведущих* — лидеры по ролям.\n"
         "3. *Топ Опозданий* — антирейтинг пунктуальности.\n"
         "4. *Тематические топы* — лидеры в квестах Дружба, ПДД и в локации Адымнар.\n\n"
         "💡 _Используйте стрелочки под топом, чтобы переключаться между разными категориями лидербордов!_"
@@ -2332,22 +2439,7 @@ async def run_saturday_autobooking_precheck(bot: Bot, year_group: int):
             
         TEMP_AUTO_BOOKINGS[cid] = matches
         
-        lines = []
-        for idx, m in enumerate(matches, 1):
-            try:
-                dt = datetime.strptime(m["date"], "%Y-%m-%d")
-                day_w = DAYS_RU.get(dt.weekday(), "")
-                mon = MONTHS_RU.get(dt.month, "")
-                date_fmt = f"{dt.day} {mon} ({day_w})"
-            except Exception:
-                date_fmt = m["date"]
-            lines.append(
-                f"{idx}. 📅 {date_fmt} | ⏱️ {m['time']}\n"
-                f"   🏫 {m['school']}\n"
-                f"   🎯 {m['category']} | Станция {m['station_num']}"
-            )
-            
-        matches_text = "\n\n".join(lines)
+        matches_text = format_compact_shifts_list(matches, is_saturday_preview=True)
         
         storm_time = "10:00" if year_group == 2 else "12:00"
         if settings.get("auto_booking_mode", "confirm") == "auto":
@@ -3157,15 +3249,13 @@ async def handle_auto_booking_confirm_confirm(callback: CallbackQuery):
         parse_mode="Markdown", reply_markup=get_back_btn("user_profile")
     )
 
-@router.callback_query(F.data == "shift_log")
-async def handle_shift_log(callback: CallbackQuery):
+async def render_shift_log_page(callback: CallbackQuery, target_monday_str: str):
     cid = callback.message.chat.id
     acc = get_linked_account(cid)
     if not acc:
         await callback.answer("Аккаунт не привязан!", show_alert=True)
         return
-    try: await callback.answer()
-    except Exception: pass
+    
     site_name = acc.get("name", "")
     if not GLOBAL_CACHED_DATA:
         await callback.message.edit_text(
@@ -3173,6 +3263,7 @@ async def handle_shift_log(callback: CallbackQuery):
             reply_markup=get_back_btn("user_profile")
         )
         return
+        
     stats = get_user_stats(site_name, list(PERSISTENT_EVENTS.values()))
     if not stats or not stats["history"]:
         await callback.message.edit_text(
@@ -3180,24 +3271,109 @@ async def handle_shift_log(callback: CallbackQuery):
             parse_mode="Markdown", reply_markup=get_back_btn("user_profile")
         )
         return
+
     history = stats["history"]
+    
+    try:
+        target_monday = datetime.strptime(target_monday_str, "%Y-%m-%d").date()
+    except Exception:
+        now_msk = get_msk_now()
+        target_monday = now_msk.date() - timedelta(days=now_msk.date().weekday())
+        target_monday_str = target_monday.strftime("%Y-%m-%d")
+
+    shift_dates = []
+    for h in history:
+        try:
+            dt = datetime.strptime(h["date"], "%Y-%m-%d").date()
+            shift_dates.append(dt)
+        except Exception:
+            pass
+            
+    now_msk = get_msk_now()
+    current_monday = now_msk.date() - timedelta(days=now_msk.date().weekday())
+    
+    all_dates = shift_dates + [current_monday]
+    min_date = min(all_dates)
+    max_date = max(all_dates)
+    
+    start_monday = min_date - timedelta(days=min_date.weekday())
+    end_monday = max_date - timedelta(days=max_date.weekday())
+    
+    target_sunday = target_monday + timedelta(days=6)
+    week_shifts = []
+    for h in history:
+        try:
+            dt = datetime.strptime(h["date"], "%Y-%m-%d").date()
+            if target_monday <= dt <= target_sunday:
+                week_shifts.append(h)
+        except Exception:
+            pass
+            
+    months_ru_genitive = {
+        1: "января", 2: "февраля", 3: "марта", 4: "апреля", 5: "мая", 6: "июня",
+        7: "июля", 8: "августа", 9: "сентября", 10: "октября", 11: "ноября", 12: "декабря"
+    }
+    
+    monday_fmt = f"{target_monday.day} {months_ru_genitive[target_monday.month]}"
+    sunday_fmt = f"{target_sunday.day} {months_ru_genitive[target_sunday.month]}"
+    week_range_str = f"с {monday_fmt} - {sunday_fmt}"
+    
     completed_p = stats["completed_player"]
     completed_l = stats["completed_leader"]
     total_shifts = completed_p + completed_l
     lates = stats["lates"]
+    
     header = (
-        f"📜 *ЛОГ СМЕН — {site_name}*\n\n"
-        f"Смен: *{total_shifts}* (🏃 {completed_p} + 👑 {completed_l}) | Опозданий: *{lates}*\n\n"
+        f"📜 *ЛОГ СМЕН — {site_name}*\n"
+        f"📅 *Неделя: {week_range_str}*\n\n"
+        f"Всего смен: *{total_shifts}* (🏃 {completed_p} + 👑 {completed_l}) | Опозданий: *{lates}*\n\n"
     )
-    history_text = "\n".join(history[-30:])
-    if len(history) > 30:
-        history_text = f"_...показаны последние 30 из {len(history)}_\n\n" + history_text
+    
+    if not week_shifts:
+        history_text = "_Нет смен на этой неделе._"
+    else:
+        history_text = format_compact_shifts_list(week_shifts, is_saturday_preview=False)
+        
     text = header + history_text
     if len(text) > 4000:
         text = text[:3950] + "\n\n_...обрезано_"
-    await callback.message.edit_text(
-        text, parse_mode="Markdown", reply_markup=get_back_btn("user_profile")
-    )
+        
+    builder = InlineKeyboardBuilder()
+    
+    nav_row = []
+    if target_monday > start_monday:
+        prev_monday = target_monday - timedelta(days=7)
+        nav_row.append(InlineKeyboardButton(text="◀️ Пред. неделя", callback_data=f"shift_log_week:{prev_monday.strftime('%Y-%m-%d')}"))
+    if target_monday < end_monday:
+        next_monday = target_monday + timedelta(days=7)
+        nav_row.append(InlineKeyboardButton(text="След. неделя ▶️", callback_data=f"shift_log_week:{next_monday.strftime('%Y-%m-%d')}"))
+        
+    if nav_row:
+        builder.row(*nav_row)
+        
+    builder.row(InlineKeyboardButton(text="↩️ Профиль", callback_data="user_profile"))
+    
+    try:
+        await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=builder.as_markup())
+    except Exception as e:
+        print(f"[!] Error editing shift log message: {e}")
+
+@router.callback_query(F.data == "shift_log")
+async def handle_shift_log(callback: CallbackQuery):
+    try: await callback.answer()
+    except Exception: pass
+    
+    now_msk = get_msk_now()
+    current_monday = now_msk.date() - timedelta(days=now_msk.date().weekday())
+    await render_shift_log_page(callback, current_monday.strftime("%Y-%m-%d"))
+
+@router.callback_query(F.data.startswith("shift_log_week:"))
+async def handle_shift_log_week(callback: CallbackQuery):
+    try: await callback.answer()
+    except Exception: pass
+    
+    week_str = callback.data.split(":", 1)[1]
+    await render_shift_log_page(callback, week_str)
 
 @router.message(F.text)
 async def process_text_input(message: Message, bot: Bot):
@@ -3547,9 +3723,9 @@ async def handle_admin_panel(callback: CallbackQuery):
             is_experienced = user_info.get("is_experienced", False)
             
             roles = []
-            if is_leader: roles.append("👑 Ведущий")
+            if is_leader: roles.append("👑 Главарь")
             if is_experienced: roles.append("⭐ Опытный")
-            role_str = ", ".join(roles) if roles else "🏃 Игрок"
+            role_str = ", ".join(roles) if roles else "🏃 Ведущий"
             
             bot_profile_str = (
                 f"\n👤 *Профиль бота в J-GET:*\n"
@@ -3640,7 +3816,7 @@ def calculate_tops(is_admin):
         "earn": {"title": "💰 Топ Заработка", "data": {}},
         "veterans": {"title": "🎖 Ветераны (Всего смен)", "data": {}},
         "leaders": {"title": "👑 Топ Главарей", "data": {}},
-        "players": {"title": "🏃 Топ Игроков", "data": {}},
+        "players": {"title": "🏃 Топ Ведущих", "data": {}},
         "lates": {"title": "⏰ Топ Опозданий", "data": {}},
         
         # Квесты
