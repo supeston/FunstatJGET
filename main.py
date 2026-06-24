@@ -69,13 +69,13 @@ def normalize_phone_for_display(phone_str: str) -> str:
         return ""
     digits = "".join(c for c in str(phone_str) if c.isdigit())
     if len(digits) == 10:
-        return f"+7{digits}"
+        return f"8{digits}"
     elif len(digits) == 11:
         if digits.startswith("8") or digits.startswith("7"):
-            return f"+7{digits[1:]}"
-        return f"+{digits}"
+            return f"8{digits[1:]}"
+        return f"8{digits}"
     elif len(digits) > 0:
-        return f"+{digits}"
+        return f"{digits}"
     return ""
 
 def format_compact_shifts_list(shifts: list, is_saturday_preview: bool = False) -> str:
@@ -2035,7 +2035,7 @@ async def handle_today_plan(callback: CallbackQuery):
                             p_phone = participant.get("phone", "")
                             norm_phone = normalize_phone_for_display(p_phone)
                             if norm_phone:
-                                leader_name = f"[{p_full}](tel:{norm_phone})"
+                                leader_name = f"{p_full} 📞 {norm_phone}"
                             else:
                                 leader_name = p_full
                             break
@@ -2072,7 +2072,7 @@ async def handle_today_plan(callback: CallbackQuery):
                                 p_phone = participant.get("phone", "")
                                 norm_phone = normalize_phone_for_display(p_phone)
                                 if norm_phone:
-                                    friend_str = f"[{p_full}](tel:{norm_phone}) ({p_role})"
+                                    friend_str = f"{p_full} 📞 {norm_phone} ({p_role})"
                                 else:
                                     friend_str = f"{p_full} ({p_role})"
                                 friend_list.append(friend_str)
