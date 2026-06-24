@@ -127,7 +127,7 @@ def format_compact_shifts_list(shifts: list, is_saturday_preview: bool = False) 
             num_shifts = len(s_shifts)
             for shift_idx, item in enumerate(s_shifts):
                 is_last_shift = (shift_idx == num_shifts - 1)
-                shift_branch = "└ " if is_last_shift else "├ "
+                shift_branch = " └" if is_last_shift else "├"
                 
                 if is_saturday_preview:
                     station_val = item.get("station_num", "?")
@@ -151,7 +151,7 @@ def format_compact_shifts_list(shifts: list, is_saturday_preview: bool = False) 
                     status_str = f", {', '.join(status_list)}" if status_list else ""
                     details_str = f"{item['category']} ({role_val}{status_str})"
                 
-                merged_lines.append(f"{child_indent}{shift_branch}{line_icon} {details_str} | {item['start_time'][:5]}-{item['end_time'][:5]}")
+                merged_lines.append(f"{child_indent}{shift_branch}{details_str} | {item['start_time'][:5]}-{item['end_time'][:5]} {line_icon}")
                 
             school_lines.append(school_header + "\n" + "\n".join(merged_lines))
             
