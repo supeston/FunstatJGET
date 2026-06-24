@@ -2027,15 +2027,17 @@ async def handle_today_plan(callback: CallbackQuery):
                     category = clean_category_name(raw_cat)
                     
                     leader_name = "Не назначен"
-                    leader_phone = ""
                     for participant in event.get("participants", []):
                         if participant.get("as_leader"):
                             p_fn = participant.get("first_name", "").strip()
                             p_ln = participant.get("last_name", "").strip()
                             p_full = f"{p_fn} {p_ln}".strip()
-                            leader_name = p_full
                             p_phone = participant.get("phone", "")
-                            leader_phone = normalize_phone_for_display(p_phone)
+                            norm_phone = normalize_phone_for_display(p_phone)
+                            if norm_phone:
+                                leader_name = f"[{p_full}](tel:{norm_phone})"
+                            else:
+                                leader_name = p_full
                             break
 
                     if as_leader:
@@ -2047,8 +2049,7 @@ async def handle_today_plan(callback: CallbackQuery):
                         st_name = st_obj.get("name") if isinstance(st_obj, dict) else ""
                         st_num = get_station_num(st_name)
                         role_str = f"Станция: {st_num}" if st_num else "Ведущий"
-                        phone_part = f"\n  • {leader_phone}" if leader_phone else ""
-                        role_display = f"Станция: *{st_num}* | Ведущий: {leader_name}{phone_part}" if st_num else f"*Ведущий* ({leader_name}){phone_part}"
+                        role_display = f"Станция: *{st_num}* | Ведущий: {leader_name}" if st_num else f"*Ведущий* ({leader_name})"
                         icon = "⭐"
                     
                     friends = ""
@@ -2070,12 +2071,13 @@ async def handle_today_plan(callback: CallbackQuery):
                                     
                                 p_phone = participant.get("phone", "")
                                 norm_phone = normalize_phone_for_display(p_phone)
-                                friend_str = f" • {p_full} ({p_role})"
                                 if norm_phone:
-                                    friend_str += f"\n • {norm_phone}"
+                                    friend_str = f"[{p_full}](tel:{norm_phone}) ({p_role})"
+                                else:
+                                    friend_str = f"{p_full} ({p_role})"
                                 friend_list.append(friend_str)
                         if friend_list:
-                            friends = "\n🤝 Свои на смене:\n" + "\n".join(friend_list)
+                            friends = "\n🤝 Свои на смене: " + ", ".join(friend_list)
 
                     target_shifts.append({
                         "school": school_name,
@@ -2089,7 +2091,6 @@ async def handle_today_plan(callback: CallbackQuery):
                         "raw_cat": raw_cat,
                         "payout": payout,
                         "leader_name": leader_name,
-                        "leader_phone": leader_phone,
                         "friends": friends
                     })
     if not target_shifts:
@@ -2148,11 +2149,7 @@ async def handle_today_plan(callback: CallbackQuery):
                 role_lines = ["⭐ Роли по сменам:"]
                 for s_idx, s in enumerate(block):
                     connector = " ├ " if s_idx < len(block) - 1 else " └ "
-                    leader_info = ""
-                    if s['role'] != "Главарь":
-                        leader_info = f" (Ведущий: {s['leader_name']})"
-                        if s.get('leader_phone'):
-                            leader_info += f"\n     • {s['leader_phone']}"
+                    leader_info = "" if s['role'] == "Главарь" else f" (Ведущий: {s['leader_name']})"
                     role_lines.append(f"  {connector}⏰ *{s['start_time'][:5]} - {s['end_time'][:5]}* — {s['icon']} *{s['role']}*{leader_info}")
                 role_str = "\n".join(role_lines)
             friends_out = "".join(dict.fromkeys(s.get("friends", "") for s in block if s.get("friends", "")))
