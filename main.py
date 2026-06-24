@@ -121,7 +121,7 @@ def format_compact_shifts_list(shifts: list, is_saturday_preview: bool = False) 
             school_header = f"{school_prefix}🏫 *{school}*"
             
             # Shift prefix for indenting shifts under this school
-            child_indent = "   " if is_last_school else "│  "
+            child_indent = "    " if is_last_school else "│   "
             
             merged_lines = []
             num_shifts = len(s_shifts)
