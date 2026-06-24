@@ -69,13 +69,13 @@ def normalize_phone_for_display(phone_str: str) -> str:
         return ""
     digits = "".join(c for c in str(phone_str) if c.isdigit())
     if len(digits) == 10:
-        return f"8{digits}"
+        return f"+7{digits}"
     elif len(digits) == 11:
         if digits.startswith("8") or digits.startswith("7"):
-            return f"8{digits[1:]}"
-        return f"8{digits}"
+            return f"+7{digits[1:]}"
+        return f"+{digits}"
     elif len(digits) > 0:
-        return f"{digits}"
+        return f"+{digits}"
     return ""
 
 def format_compact_shifts_list(shifts: list, is_saturday_preview: bool = False) -> str:
@@ -107,43 +107,21 @@ def format_compact_shifts_list(shifts: list, is_saturday_preview: bool = False) 
         for school, s_shifts in sorted(by_school.items()):
             s_shifts = sorted(s_shifts, key=lambda x: x["start_time"])
             
-            merged = []
-            for s in s_shifts:
-                if not merged:
-                    merged.append({
-                        "start_time": s["start_time"],
-                        "end_time": s["end_time"],
-                        "items": [s]
-                    })
-                else:
-                    last = merged[-1]
-                    if last["end_time"] == s["start_time"]:
-                        last["end_time"] = s["end_time"]
-                        last["items"].append(s)
-                    else:
-                        merged.append({
-                            "start_time": s["start_time"],
-                            "end_time": s["end_time"],
-                            "items": [s]
-                        })
-            
             merged_lines = []
-            for block in merged:
-                details = []
-                for item in block["items"]:
-                    if is_saturday_preview:
-                        details.append(f"{item['category']} (ст. {item['station_num']})")
-                    else:
-                        status_str = ""
-                        if item.get("is_completed"):
-                            if not item.get("attended", True):
-                                status_str = " ❌ (Прогул)"
-                            elif item.get("late", False):
-                                status_str = " ⚠️ (Опоздание)"
-                        role_val = item.get("role", "Ведущий")
-                        details.append(f"{item['category']} ({role_val}{status_str})")
-                details_str = " + ".join(details)
-                merged_lines.append(f"  • ⏱️ {block['start_time']}-{block['end_time']} | 🎯 {details_str}")
+            for item in s_shifts:
+                if is_saturday_preview:
+                    details_str = f"{item['category']} (ст. {item['station_num']})"
+                else:
+                    status_str = ""
+                    if item.get("is_completed"):
+                        if not item.get("attended", True):
+                            status_str = " ❌ (Прогул)"
+                        elif item.get("late", False):
+                            status_str = " ⚠️ (Опоздание)"
+                    role_val = item.get("role", "Ведущий")
+                    details_str = f"{item['category']} ({role_val}{status_str})"
+                
+                merged_lines.append(f"  • ⏱️ {item['start_time'][:5]}-{item['end_time'][:5]} | 🎯 {details_str}")
                 
             school_header = f" 🏫 *{school}*:"
             school_lines.append(school_header + "\n" + "\n".join(merged_lines))
@@ -2035,7 +2013,7 @@ async def handle_today_plan(callback: CallbackQuery):
                             p_phone = participant.get("phone", "")
                             norm_phone = normalize_phone_for_display(p_phone)
                             if norm_phone:
-                                leader_name = f"{p_full} 📞 {norm_phone}"
+                                leader_name = f"[{p_full}](tel:{norm_phone})"
                             else:
                                 leader_name = p_full
                             break
@@ -2072,7 +2050,7 @@ async def handle_today_plan(callback: CallbackQuery):
                                 p_phone = participant.get("phone", "")
                                 norm_phone = normalize_phone_for_display(p_phone)
                                 if norm_phone:
-                                    friend_str = f"{p_full} 📞 {norm_phone} ({p_role})"
+                                    friend_str = f"[{p_full}](tel:{norm_phone}) ({p_role})"
                                 else:
                                     friend_str = f"{p_full} ({p_role})"
                                 friend_list.append(friend_str)
