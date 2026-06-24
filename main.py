@@ -134,23 +134,24 @@ def format_compact_shifts_list(shifts: list, is_saturday_preview: bool = False) 
                     details_str = f"{item['category']} (ст. {station_val})"
                     line_icon = "•"
                 else:
-                    status_str = ""
+                    status_list = []
                     if item.get("is_completed"):
                         if not item.get("attended", True):
-                            status_str = " (Прогул)"
+                            status_list.append("Прогул")
                             line_icon = "❌"
                         elif item.get("late", False):
-                            status_str = " (Опоздание)"
+                            status_list.append("Опозд.")
                             line_icon = "⚠️"
                         else:
                             line_icon = "✅"
                     else:
                         line_icon = "⏳"
                         
-                    role_val = item.get("role", "Ведущий")
+                    role_val = str(item.get("role", "Ведущий")).replace("Станция ", "ст. ")
+                    status_str = f", {', '.join(status_list)}" if status_list else ""
                     details_str = f"{item['category']} ({role_val}{status_str})"
                 
-                merged_lines.append(f"{child_indent}{shift_branch}{line_icon} {item['start_time'][:5]}-{item['end_time'][:5]} | {details_str}")
+                merged_lines.append(f"{child_indent}{shift_branch}{line_icon} {details_str} | {item['start_time'][:5]}-{item['end_time'][:5]}")
                 
             school_lines.append(school_header + "\n" + "\n".join(merged_lines))
             
