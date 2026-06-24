@@ -98,23 +98,40 @@ def format_compact_shifts_list(shifts: list, is_saturday_preview: bool = False) 
         except Exception:
             day_name = d_str
             
+        day_icon = "🔜" if is_future_day else "📅"
         if is_future_day:
-            day_header = f"*{day_name}* (Предстоит)"
+            day_header = f"{day_icon} *{day_name}* (Предстоит)"
         else:
-            day_header = f"*{day_name}*"
+            day_header = f"{day_icon} *{day_name}*"
         
         by_school = {}
         for s in day_shifts:
             by_school.setdefault(s["school"], []).append(s)
             
+        sorted_schools = sorted(by_school.items())
+        num_schools = len(sorted_schools)
+        
         school_lines = []
-        for school, s_shifts in sorted(by_school.items()):
+        for school_idx, (school, s_shifts) in enumerate(sorted_schools):
             s_shifts = sorted(s_shifts, key=lambda x: x["start_time"])
+            is_last_school = (school_idx == num_schools - 1)
+            
+            # School tree prefix
+            school_prefix = "└── 🏫 " if is_last_school else "├── 🏫 "
+            school_header = f"{school_prefix}*{school}*"
+            
+            # Shift prefix for indenting shifts under this school
+            child_indent = "    " if is_last_school else "│   "
             
             merged_lines = []
-            for item in s_shifts:
+            num_shifts = len(s_shifts)
+            for shift_idx, item in enumerate(s_shifts):
+                is_last_shift = (shift_idx == num_shifts - 1)
+                shift_branch = "└── " if is_last_shift else "├── "
+                
                 if is_saturday_preview:
-                    details_str = f"{item['category']} (ст. {item['station_num']})"
+                    station_val = item.get("station_num", "?")
+                    details_str = f"{item['category']} (ст. {station_val})"
                     line_icon = "•"
                 else:
                     status_str = ""
@@ -133,9 +150,8 @@ def format_compact_shifts_list(shifts: list, is_saturday_preview: bool = False) 
                     role_val = item.get("role", "Ведущий")
                     details_str = f"{item['category']} ({role_val}{status_str})"
                 
-                merged_lines.append(f"  {line_icon} {item['start_time'][:5]}-{item['end_time'][:5]} | {details_str}")
+                merged_lines.append(f"{child_indent}{shift_branch}{line_icon} {item['start_time'][:5]}-{item['end_time'][:5]} | {details_str}")
                 
-            school_header = f"*{school}*:"
             school_lines.append(school_header + "\n" + "\n".join(merged_lines))
             
         day_blocks.append(day_header + "\n" + "\n".join(school_lines))
