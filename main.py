@@ -98,66 +98,55 @@ def format_compact_shifts_list(shifts: list, is_saturday_preview: bool = False) 
         except Exception:
             day_name = d_str
             
-        day_icon = "🔜" if is_future_day else "📅"
         if is_future_day:
-            day_header = f"{day_icon} *{day_name}* (Предстоит)"
+            day_header = f"🔜 *{day_name}* (Предстоит)"
         else:
-            day_header = f"{day_icon} *{day_name}*"
+            day_header = f"📅 *{day_name}*"
         
         by_school = {}
         for s in day_shifts:
             by_school.setdefault(s["school"], []).append(s)
             
         sorted_schools = sorted(by_school.items())
-        num_schools = len(sorted_schools)
         
         school_lines = []
-        for school_idx, (school, s_shifts) in enumerate(sorted_schools):
+        for school, s_shifts in sorted_schools:
             s_shifts = sorted(s_shifts, key=lambda x: x["start_time"])
-            is_last_school = (school_idx == num_schools - 1)
+            school_header = f"  🏫 *{school}*"
             
-            # School tree prefix
-            school_prefix = "└ " if is_last_school else "├ "
-            school_header = f"{school_prefix}🏫 *{school}*"
-            
-            # Shift prefix for indenting shifts under this school
-            child_indent = "  " if is_last_school else "│ "
-            
-            merged_lines = []
-            num_shifts = len(s_shifts)
-            for shift_idx, item in enumerate(s_shifts):
-                is_last_shift = (shift_idx == num_shifts - 1)
-                shift_branch = " └" if is_last_shift else "├"
-                
+            shift_lines = []
+            for item in s_shifts:
                 if is_saturday_preview:
                     station_val = item.get("station_num", "?")
-                    details_str = f"{item['category']} (ст. {station_val})"
-                    line_icon = "•"
+                    info = f"{item['category']} · ст. {station_val}"
+                    icon = "•"
                 else:
-                    status_list = []
                     if item.get("is_completed"):
                         if not item.get("attended", True):
-                            status_list.append("Прогул")
-                            line_icon = "❌"
+                            icon = "❌"
+                            extra = " · Прогул"
                         elif item.get("late", False):
-                            status_list.append("Опозд.")
-                            line_icon = "⚠️"
+                            icon = "⚠️"
+                            extra = " · Опозд."
                         else:
-                            line_icon = "✅"
+                            icon = "✅"
+                            extra = ""
                     else:
-                        line_icon = "⏳"
+                        icon = "⏳"
+                        extra = ""
                         
                     role_val = str(item.get("role", "Ведущий")).replace("Станция ", "ст. ")
-                    status_str = f", {', '.join(status_list)}" if status_list else ""
-                    details_str = f"{item['category']} ({role_val}{status_str})"
+                    info = f"{item['category']} · {role_val}{extra}"
                 
-                merged_lines.append(f"{child_indent}{shift_branch}{details_str} | {item['start_time'][:5]}-{item['end_time'][:5]} {line_icon}")
+                time_str = f"{item['start_time'][:5]}–{item['end_time'][:5]}"
+                shift_lines.append(f"     {icon} {time_str} | {info}")
                 
-            school_lines.append(school_header + "\n" + "\n".join(merged_lines))
+            school_lines.append(school_header + "\n" + "\n".join(shift_lines))
             
         day_blocks.append(day_header + "\n" + "\n".join(school_lines))
         
     return "\n\n".join(day_blocks)
+
 
 
 BOT_MESSAGE_ID = {}
