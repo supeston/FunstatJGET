@@ -91,13 +91,17 @@ def format_compact_shifts_list(shifts: list, is_saturday_preview: bool = False) 
     day_blocks = []
     for d_str in sorted_dates:
         day_shifts = by_date[d_str]
+        is_future_day = all(not s.get("is_completed") for s in day_shifts)
         try:
             dt = datetime.strptime(d_str, "%Y-%m-%d")
             day_name = DAYS_RU.get(dt.weekday(), "Неизвестно")
         except Exception:
             day_name = d_str
             
-        day_header = f"📅 *{day_name}*"
+        if is_future_day:
+            day_header = f"🔜 *{day_name}* (Предстоит)"
+        else:
+            day_header = f"📅 *{day_name}*"
         
         by_school = {}
         for s in day_shifts:
@@ -111,17 +115,25 @@ def format_compact_shifts_list(shifts: list, is_saturday_preview: bool = False) 
             for item in s_shifts:
                 if is_saturday_preview:
                     details_str = f"{item['category']} (ст. {item['station_num']})"
+                    line_icon = "•"
                 else:
                     status_str = ""
                     if item.get("is_completed"):
                         if not item.get("attended", True):
-                            status_str = " ❌ (Прогул)"
+                            status_str = " (Прогул)"
+                            line_icon = "❌"
                         elif item.get("late", False):
-                            status_str = " ⚠️ (Опоздание)"
+                            status_str = " (Опоздание)"
+                            line_icon = "⚠️"
+                        else:
+                            line_icon = "✅"
+                    else:
+                        line_icon = "⏳"
+                        
                     role_val = item.get("role", "Ведущий")
                     details_str = f"{item['category']} ({role_val}{status_str})"
                 
-                merged_lines.append(f"  • ⏱️ {item['start_time'][:5]}-{item['end_time'][:5]} | 🎯 {details_str}")
+                merged_lines.append(f"  {line_icon} ⏱️ {item['start_time'][:5]}-{item['end_time'][:5]} | 🎯 {details_str}")
                 
             school_header = f" 🏫 *{school}*:"
             school_lines.append(school_header + "\n" + "\n".join(merged_lines))
